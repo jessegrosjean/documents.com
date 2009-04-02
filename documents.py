@@ -55,7 +55,7 @@ class Account(db.Model):
 		return documents
 
 	def get_edits_with_unresolved_conflicts(self):
-		return Edit.gql("WHERE account = :1 AND conflicts_resolved = :2", self, False)
+		return Edit.gql("WHERE account = :1 AND conflicts_resolved = :2 ORDER BY created DESC", self, False)
 
 class Document(db.Model):
 	version = db.IntegerProperty(required=True)
@@ -508,7 +508,7 @@ class ConflictsHandler(webapp.RequestHandler):
 	@require_account
 	def get(self, account):
 		conflict_dicts = []
-		for edit in account.get_edits_with_unresolved_conflicts():
+		for edit in account.get_edits_with_unresolved_conflicts().fetch(10):
 			if edit.is_valid():
 				conflict_dicts.append(edit.to_conflict_dictionary())
 		write_json_response(self.response, conflict_dicts)

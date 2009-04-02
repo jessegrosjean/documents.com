@@ -23,7 +23,9 @@ textarea:focus { outline:none; }
 .window .window-content-frame { padding:0.5em; width:100%; height:100%; }
 .window .window-content { width:100%; height:100%; border:none; font:1.0em Helvetica; }
 
-#status { position:absolute; top:4em; left:0.5em; background:black; color:white; padding:0; font-weight:bold; }
+.conflict { margin-bottom:1em; padding-bottom:0.5em; border-bottom:1px solid black; width:100%; }
+
+#progress { position:absolute; top:4em; left:0.5em; background:black; color:white; padding:0; font-weight:bold; }
 
 .gwt-DialogBox {
 	background:white;
