@@ -1,0 +1,33 @@
+application: hogbaytaskpaper
+version: 1
+runtime: python
+api_version: 1
+
+handlers:
+
+- url: /
+  static_files: www/index.html
+  upload: www/index.html
+
+- url: /favicon.ico
+  static_files: www/favicon.ico
+  upload: www/favicon.ico
+
+- url: /documents/
+  static_files: www/com.hogbaysoftware.documents.Documents/Documents.html
+  upload: www/com.hogbaysoftware.documents.Documents/Documents.html
+  login: required
+
+- url: /documents
+  static_dir: www/com.hogbaysoftware.documents.Documents
+  login: required
+
+- url: /documents
+  script: documents.py
+
+- url: /v1/.*
+  script: documents.py
+ 
+- url: /admin/.*
+  script: $PYTHON_LIB/google/appengine/ext/admin
+  login: admin
