@@ -220,11 +220,11 @@ function com_hogbaysoftware_documents_Documents(){
   }
    else {
     try {
-      unflattenKeylistIntoAnswers(['opera'], 'F778287BB8E931C1E562E65E4684C56F.cache.html');
-      unflattenKeylistIntoAnswers(['gecko1_8'], '8A46C37CE5970C055FE463087E938788.cache.html');
-      unflattenKeylistIntoAnswers(['ie6'], '79C730760014BE6D8ADD896CFC4E6183.cache.html');
-      unflattenKeylistIntoAnswers(['gecko'], '7AD0DD300E70241E144657CBAF053F0E.cache.html');
-      unflattenKeylistIntoAnswers(['safari'], '79647DF28F171A2178D185613762D57C.cache.html');
+      unflattenKeylistIntoAnswers(['opera'], '6FFAF257C926E20162C7DE6C8A78D7C6.cache.html');
+      unflattenKeylistIntoAnswers(['gecko1_8'], 'A81D8A2F1C34AF80C5017320DA57FEC6.cache.html');
+      unflattenKeylistIntoAnswers(['ie6'], 'AA9E7AA5BFFE69A7FACFD2EE73D42C49.cache.html');
+      unflattenKeylistIntoAnswers(['gecko'], 'F02E07FC9D78C433145E709B6A14A5AC.cache.html');
+      unflattenKeylistIntoAnswers(['safari'], '453D97A4490F8AA73CDE0B96D864F8E8.cache.html');
       strongName = answers[computePropValue('user.agent')];
     }
      catch (e) {

@@ -1,47 +1,30 @@
 body { margin:0; padding:0; background:white; font:1em 'Lucida Grande', Geneva, Arial, Verdana, sans-serif; }
-a { color:#black; }
+a { color:black; }
 #desktop { }
 #menu { padding:0.25em; font-size:1em; border-bottom:1px solid black; }
 #menu a, #menu a:visited { font-weight:bold; margin:0.25em;}
-#menu_left { float:left; }
-#menu_right { text-align:right; }
-//#window { margin:0.5em; }
-//#title-bar { background:white; border:1px solid black; border-bottom:none; text-align:center; padding:0.25em; font-weight:bold; background-image: url('title-bar.png'); background-repeat: repeat-x; background-position:50%; }
-//#title { background:white; padding:0 1em; }
-//textarea { border:none; margin:0; border:1px solid black; padding:0.5em; font-family:monospace; font-size:1.0em; }
 textarea:focus { outline:none; }
 
 .menu { width:100%; padding:0.25em; font-weight:bold; border-bottom:1px solid black; }
-.menu .gwt-Label { margin:0 0.25em; white-space:nowrap; }
-.menuItem { font-weight:bold; text-decoration:none; cursor:hand; cursor:pointer; }
+.menu .logo { margin:0 0.5em; }
+.menuItem { margin:0 0.25em; white-space:nowrap; font-weight:bold; text-decoration:none; cursor:hand; cursor:pointer; }
 .menuItem:hover { text-decoration:underline; }
-.disabled { color:#777; text-decoration:none; cursor:default; }
+
+.disabled { color:#777; cursor:default; }
+.disabled:hover { text-decoration:none; }
 
 .window { width:100%; }
 .window .window-title-bar { border-bottom:1px solid black; text-align:center; width:100%; padding:0.25em; font-weight:bold; background-image: url('title-bar.png'); background-repeat: repeat-x; background-position:50%; }
-.window .window-title { font-weight:bold; background:white; padding:0 1em; display:inline; text-align:center; }
+.window .window-title { font-weight:bold; background:white; padding:0 1em; }
 .window .window-content-frame { padding:0.5em; width:100%; height:100%; }
 .window .window-content { width:100%; height:100%; border:none; font:1.0em Helvetica; }
 
 .conflict { margin-bottom:1em; padding-bottom:0.5em; border-bottom:1px solid black; width:100%; }
 
-#progress { position:absolute; top:4em; left:0.5em; background:black; color:white; padding:0; font-weight:bold; }
+.revisionLink { display:inline; margin:0 0.5em 0 0; }
 
 .gwt-DialogBox {
 	background:white;
 	border:3px solid black;
 	padding:1em;
-}
-
-.Caption {
-font-weight:bold;
-}
-
-.pc-template-btn {
-  display: block;
-  font-size: 16pt
-}
-
-#pc-template-img {
-  margin-top: 20px;
 }

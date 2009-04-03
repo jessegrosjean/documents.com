@@ -529,7 +529,6 @@ class DocumentHandler(webapp.RequestHandler):
 	
 	@require_document
 	def put(self, user_account, document_account, document):
-		self.request.method = 'POST' # hack so that request.get() works.
 		jsonDocument = simplejson.loads(self.request.body)
 		version = jsonDocument.get('version')
 		version = None if version == None else int(version)
@@ -538,7 +537,6 @@ class DocumentHandler(webapp.RequestHandler):
 		tags = list_from_string(jsonDocument.get('tags'))
 		user_emails = list_from_string(jsonDocument.get('user_emails'))
 		content = jsonDocument.get('content', None)			
-		self.request.method = 'PUT' # undo hack.
 
 		if name == None and user_emails == None and (version == None or content == None):
 			self.error(400)
@@ -650,13 +648,14 @@ class DocumentEditsHandler(webapp.RequestHandler):
 class DocumentEditHandler(webapp.RequestHandler):
 	@require_document_edit
 	def get(self, user_account, document_account, document, edit):
-		if (self.request.get('version', None)):
+		if self.request.path.find("versions") > 0:
 			name, tags, user_emails, content = get_document_version(self, document, edit.version)
 			version = {}
 			version["name"] = name
 			version["tags"] = tags
 			version["user_emails"] = user_emails
 			version["content"] = content
+			version["created"] = str(edit.created)
 			write_json_response(self.response, version)
 		else:
 			write_json_response(self.response, document.get_edits_in_json_read_form(edit.version, edit.version))
@@ -689,6 +688,7 @@ def main():
 		('/v1/documents/([0-9]+)-([0-9]+)/?', DocumentHandler),
 		('/v1/documents/([0-9]+)-([0-9]+)/edits/?', DocumentEditsHandler),
 		('/v1/documents/([0-9]+)-([0-9]+)/edits/([0-9]+)/?', DocumentEditHandler),
+		('/v1/documents/([0-9]+)-([0-9]+)/versions/([0-9]+)/?', DocumentEditHandler),
 		], debug=True)
 		
 	wsgiref.handlers.CGIHandler().run(application)
