@@ -11,6 +11,7 @@ from diff_match_patch import diff_match_patch
 from google.appengine.ext import db
 from google.appengine.api import users
 from google.appengine.ext import webapp
+from google.appengine.ext.webapp import template
 
 #
 # Models
@@ -450,10 +451,20 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 	
 	return document_account, document, edit
 
-class DocumentsRedirectHandler(webapp.RequestHandler):
+class DocumentsClientDownloadHandler(webapp.RequestHandler):
+	def head(self, *args):
+		return self.get(*args)
+
 	def get(self):
-		logging.info(users.create_logout_url('/'))
-		self.redirect("/documents/", True)
+		if self.request.path.find("/documents/") == 0:
+			user = users.get_current_user()
+			if user:
+				path = os.path.join(os.path.dirname(__file__) + '/templates', "Documents.html")
+				self.response.out.write(template.render(path, { 'user_name' : user.email(), 'logout_url' : users.create_logout_url("/") }))
+			else:
+				self.redirect(users.create_login_url("/documents/"), False)
+		else:
+			self.redirect("/documents/", True)
 		
 class DocumentsHandler(webapp.RequestHandler):
 	@require_account
@@ -618,13 +629,14 @@ class DocumentEditsHandler(webapp.RequestHandler):
 
 	@require_account
 	def post(self, user_account, document_account_id, document_id):
-		version = self.request.get('version', None)
-		name = self.request.get('name', None)
-		tags_added = list_from_string(self.request.get('tags_added', None))
-		tags_removed = list_from_string(self.request.get('tags_removed', None))
-		user_emails_added = list_from_string(self.request.get('user_emails_added', None))
-		user_emails_removed = list_from_string(self.request.get('user_emails_removed', None))
-		patches = self.request.get('patches', None)
+		jsonDocument = simplejson.loads(self.request.body)
+		version = jsonDocument.get('version', None)
+		name = jsonDocument.get('name', None)
+		tags_added = list_from_string(jsonDocument.get('tags_added', None))
+		tags_removed = list_from_string(jsonDocument.get('tags_removed', None))
+		user_emails_added = list_from_string(jsonDocument.get('user_emails_added', None))
+		user_emails_removed = list_from_string(jsonDocument.get('user_emails_removed', None))
+		patches = jsonDocument.get('patches', None)
 
 		if version == None or (name == None and len(tags_added) == 0 and len(tags_removed) == 0 and len(user_emails_added) == 0 and len(user_emails_removed) == 0 and patches == None):
 			self.error(400)
@@ -670,7 +682,7 @@ class DocumentEditHandler(webapp.RequestHandler):
 	@require_document_edit
 	def put(self, user_account, document_account, document, edit):
 		self.request.method = 'POST' # hack so that request.get() works.
-		conflicts_resolved = self.request.get('conflicts_resolved', None) == "True"
+		conflicts_resolved = simplejson.loads(self.request.body).get('conflicts_resolved', False)
 		self.request.method = 'PUT' # undo hack.
 				
 		if conflicts_resolved:
@@ -682,7 +694,8 @@ class DocumentEditHandler(webapp.RequestHandler):
 		
 def main():
 	application = webapp.WSGIApplication([
-		('/documents', DocumentsRedirectHandler),
+		('/documents', DocumentsClientDownloadHandler),
+		('/documents/', DocumentsClientDownloadHandler),
 		('/v1/documents/?', DocumentsHandler),
 		('/v1/documents/conflicts/?', ConflictsHandler),
 		('/v1/documents/([0-9]+)-([0-9]+)/?', DocumentHandler),

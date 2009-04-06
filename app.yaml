@@ -13,16 +13,10 @@ handlers:
   static_files: www/favicon.ico
   upload: www/favicon.ico
 
+- url: /documents
+  script: documents.py
+
 - url: /documents/
-  static_files: www/com.hogbaysoftware.documents.Documents/Documents.html
-  upload: www/com.hogbaysoftware.documents.Documents/Documents.html
-  login: required
-
-- url: /documents
-  static_dir: www/com.hogbaysoftware.documents.Documents
-  login: required
-
-- url: /documents
   script: documents.py
 
 - url: /v1/.*
@@ -31,3 +25,6 @@ handlers:
 - url: /admin/.*
   script: $PYTHON_LIB/google/appengine/ext/admin
   login: admin
+  
+- url: /documents
+  static_dir: www/com.hogbaysoftware.documents.Documents
