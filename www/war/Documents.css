@@ -1,0 +1,26 @@
+body { margin:0; padding:0; background:white; font:1em 'Lucida Grande', Geneva, Arial, Verdana, sans-serif; }
+a { color:black; }
+textarea { outline:none; resize:none; }
+textarea:focus { outline:none; }
+h1, h2 { margin:0; padding:0 }
+hr { border:none; height:1px; background-color:black; }
+
+#loading { margin:0.5em; }
+
+.menu { width:100%; padding:0.25em; font-weight:bold; border-bottom:1px solid black; }
+.menuItem { margin:0 0.5em; white-space:nowrap; font-weight:bold; text-decoration:none; cursor:hand; cursor:pointer; }
+.menuItem:hover { text-decoration:underline; }
+
+.disabled { color:#777; cursor:default; }
+.disabled:hover { text-decoration:none; }
+
+.title-bar { border-bottom:1px solid black; text-align:center; width:100%; padding:0.25em; background-image: url('title-bar.png'); background-repeat: repeat-x; background-position:50%; }
+.title { font-weight:bold; background:white; padding:0 1em; }
+
+.content-container { width:100%; height:100%; padding:0.5em; }
+.content { border:none; font:1.0em Helvetica; width:100%; height:100%; }
+.scrolled-content { padding-right:0.5em; }
+
+.revisionLink { margin:0 1em 0 0; }
+.conflict-view { margin-bottom:1em; padding:0.5em; border:1px solid black; }
+.conflict-diffs { margin-top:1em; }

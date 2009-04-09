@@ -20,7 +20,7 @@ handlers:
   script: documents.py
 
 - url: /documents
-  static_dir: www/com.hogbaysoftware.documents.Documents
+  static_dir: www/war
     
 - url: /v1/.*
   script: documents.py

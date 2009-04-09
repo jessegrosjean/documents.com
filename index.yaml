@@ -10,7 +10,7 @@ indexes:
 # automatically uploaded to the admin console when you next deploy
 # your application using appcfg.py.
 
-# Used 2187 times in query history.
+# Used 2212 times in query history.
 - kind: Document
   ancestor: yes
 
@@ -21,7 +21,7 @@ indexes:
   - name: conflicts_resolved
   - name: created
 
-# Used 752 times in query history.
+# Used 766 times in query history.
 - kind: Edit
   properties:
   - name: account
@@ -33,7 +33,7 @@ indexes:
 - kind: Edit
   ancestor: yes
 
-# Used 270 times in query history.
+# Used 273 times in query history.
 - kind: Edit
   ancestor: yes
   properties:
