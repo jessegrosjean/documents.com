@@ -19,12 +19,8 @@ handlers:
 - url: /documents/
   script: documents.py
 
-- url: /v1/.*
-  script: documents.py
- 
-- url: /admin/.*
-  script: $PYTHON_LIB/google/appengine/ext/admin
-  login: admin
-  
 - url: /documents
   static_dir: www/com.hogbaysoftware.documents.Documents
+    
+- url: /v1/.*
+  script: documents.py

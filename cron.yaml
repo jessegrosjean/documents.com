@@ -1,0 +1,4 @@
+cron:
+- description: documents cron
+  url: /v1/cron
+  schedule: every 5 minutes

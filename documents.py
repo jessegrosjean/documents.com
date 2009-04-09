@@ -451,10 +451,7 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 	
 	return document_account, document, edit
 
-class DocumentsClientDownloadHandler(webapp.RequestHandler):
-	def head(self, *args):
-		return self.get(*args)
-
+class ClientHandler(webapp.RequestHandler):
 	def get(self):
 		if self.request.path.find("/documents/") == 0:
 			user = users.get_current_user()
@@ -692,16 +689,25 @@ class DocumentEditHandler(webapp.RequestHandler):
 			
 		edit.put()
 		
+class DocumentsCronHandler(webapp.RequestHandler):
+	def get(self):
+		for deleted in Deleted.all().fetch(10):
+			edits = Edit.gql('WHERE ANCESTOR IS :document', document=deleted.document_key).fetch(10)
+			db.delete(edits)
+			if (len(edits) < 10):
+				deleted.delete()
+		
 def main():
 	application = webapp.WSGIApplication([
-		('/documents', DocumentsClientDownloadHandler),
-		('/documents/', DocumentsClientDownloadHandler),
+		('/documents', ClientHandler),
+		('/documents/', ClientHandler),
 		('/v1/documents/?', DocumentsHandler),
 		('/v1/documents/conflicts/?', ConflictsHandler),
 		('/v1/documents/([0-9]+)-([0-9]+)/?', DocumentHandler),
 		('/v1/documents/([0-9]+)-([0-9]+)/edits/?', DocumentEditsHandler),
 		('/v1/documents/([0-9]+)-([0-9]+)/edits/([0-9]+)/?', DocumentEditHandler),
 		('/v1/documents/([0-9]+)-([0-9]+)/versions/([0-9]+)/?', DocumentEditHandler),
+		('/v1/cron', DocumentsCronHandler),
 		], debug=True)
 		
 	wsgiref.handlers.CGIHandler().run(application)
