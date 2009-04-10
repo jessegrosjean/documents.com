@@ -21,6 +21,9 @@ hr { border:none; height:1px; background-color:black; }
 .content { border:none; font:1.0em Helvetica; width:100%; height:100%; }
 .scrolled-content { padding-right:0.5em; }
 
-.revisionLink { margin:0 1em 0 0; }
+.revisionLinks a { margin:0 0.5em 0 0; }
+.revision .content { margin-top:0.5em; padding-top:0.5em; border-top:1px solid black; }
+
+ul { margin:0.5em; }
 .conflict-view { margin-bottom:1em; padding:0.5em; border:1px solid black; }
 .conflict-diffs { margin-top:1em; }
