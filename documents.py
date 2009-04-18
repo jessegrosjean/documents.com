@@ -11,6 +11,7 @@ from diff_match_patch import diff_match_patch
 from google.appengine.ext import db
 from google.appengine.api import users
 from google.appengine.ext import webapp
+from google.appengine.api import memcache
 from google.appengine.ext.webapp import template
 
 #
@@ -147,6 +148,13 @@ class Document(db.Model):
 
 	def to_document_dictionary(self):
 		return { 'owner' : self.parent().user.email(), 'id': self.id_string(), 'name': self.name, 'version': self.version, 'content': self.content, 'created': str(self.created), 'modified': str(self.modified) }
+	
+	def clearMemcache(self, removed_emails=[]):
+		keys = []
+		keys.append(self.owner_email())
+		keys.extend(removed_emails)
+		keys.extend(self.user_emails)
+		memcache.delete_multi(keys)		
 
 class Edit(db.Model):
 	account = db.ReferenceProperty(Account, required=True)
@@ -466,10 +474,22 @@ class ClientHandler(webapp.RequestHandler):
 class DocumentsHandler(webapp.RequestHandler):
 	@require_account
 	def get(self, account):
-		document_dicts = []
-		for document in account.get_documents():
-			document_dicts.append(document.to_index_dictionary())
-		write_json_response(self.response, document_dicts)
+		json = memcache.get(account.user.email())
+
+		if json is None:
+			document_dicts = []
+			for document in account.get_documents():
+				document_dicts.append(document.to_index_dictionary())
+			json = simplejson.dumps(document_dicts)
+			memcache.set(account.user.email(), json)
+
+		self.response.headers['Content-Type'] = 'application/json'
+		self.response.out.write(json)
+
+		#document_dicts = []
+		#for document in account.get_documents():
+		#	document_dicts.append(document.to_index_dictionary())
+		#write_json_response(self.response, document_dicts)
 	
 	@require_account
 	def post(self, account):
@@ -492,6 +512,7 @@ class DocumentsHandler(webapp.RequestHandler):
 		
 		try:
 			document = db.run_in_transaction(txn)
+			document.clearMemcache()
 		except db.TransactionFailedError:
 			self.error(503)
 			return
@@ -576,6 +597,7 @@ class DocumentHandler(webapp.RequestHandler):
 					
 		try:
 			document_account, document, edit = db.run_in_transaction(post_document_edit, self, user_account, document_account.key().id(), document.key().id(), version, name, tags_added, tags_removed, user_emails_added, user_emails_removed, patches)
+			document.clearMemcache(user_emails_removed)
 			document_edits = document.get_edits_in_json_read_form(version, document.version)
 			document_edits['content'] = document.content
 			if edit.conflicts:
@@ -606,11 +628,11 @@ class DocumentHandler(webapp.RequestHandler):
 			deleted.put()
 			document.delete()
 			document_account.put()
+			return document
 
 		try:
-			db.run_in_transaction(txn)
-			#for edit in Edit.gql("WHERE ANCESTOR IS :1", db.Key.from_path('Account', document_account.key().id(), 'Document', document_id)):
-			#	edit.delete()
+			document = db.run_in_transaction(txn)
+			document.clearMemcache()
 		except ValueError:
 			pass
 		except db.TransactionFailedError:
@@ -647,6 +669,7 @@ class DocumentEditsHandler(webapp.RequestHandler):
 			
 		try:
 			document_account, document, edit = db.run_in_transaction(post_document_edit, self, user_account, document_account_id, document_id, version, name, tags_added, tags_removed, user_emails_added, user_emails_removed, patches)			
+			document.clearMemcache(user_emails_removed)
 			document_edits = document.get_edits_in_json_read_form(version + 1, document.version)
 			if edit.conflicts:
 				document_edits["conflicts"] = edit.conflicts
