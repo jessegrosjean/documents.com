@@ -111,7 +111,7 @@ class Document(db.Model):
 		
 		for edit in self.get_edits(start, end):
 			edits["version"] = edit.version
-			
+			 
 			if edit.patches:
 				patches.append(edit.patches)
 
