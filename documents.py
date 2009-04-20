@@ -714,12 +714,14 @@ class DocumentEditHandler(webapp.RequestHandler):
 		
 class DocumentsCronHandler(webapp.RequestHandler):
 	def get(self):
+		to_delete = []
 		for deleted in Deleted.all().fetch(10):
 			edits = Edit.gql('WHERE ANCESTOR IS :document', document=deleted.document_key).fetch(10)
-			db.delete(edits)
+			to_delete.extend(edits)
 			if (len(edits) < 10):
-				deleted.delete()
-		
+				to_delete.append(deleted)
+		db.delete(to_delete)
+
 def main():
 	application = webapp.WSGIApplication([
 		('/documents', ClientHandler),
