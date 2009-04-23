@@ -13,6 +13,10 @@ handlers:
   static_files: www/favicon.ico
   upload: www/favicon.ico
 
+- url: /header.png
+  static_files: www/header.png
+  upload: www/header.png
+
 - url: /documents
   script: documents.py
 
