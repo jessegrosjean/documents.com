@@ -14,6 +14,12 @@ indexes:
 - kind: Document
   ancestor: yes
 
+# Used 32 times in query history.
+- kind: Document
+  ancestor: yes
+  properties:
+  - name: name
+
 # Unused in query history -- copied from input.
 - kind: Edit
   properties:
@@ -21,7 +27,7 @@ indexes:
   - name: conflicts_resolved
   - name: created
 
-# Unused in query history -- copied from input.
+# Used 2 times in query history.
 - kind: Edit
   properties:
   - name: account
@@ -33,7 +39,7 @@ indexes:
 - kind: Edit
   ancestor: yes
 
-# Unused in query history -- copied from input.
+# Used once in query history.
 - kind: Edit
   ancestor: yes
   properties:

@@ -51,10 +51,11 @@ class Account(db.Model):
 		return self.user == other.user if isinstance(other, Account) else False
 		
 	def get_documents(self):
-		documents = Document.gql("WHERE ANCESTOR IS :1", self).fetch(1000)
-		documents.extend(Document.gql("WHERE user_emails = :1", self.user.email()).fetch(1000))
-		documents.sort(key=operator.attrgetter('name'))
-		return documents
+		return Document.gql("WHERE ANCESTOR IS :1 ORDER BY name", self)
+		#documents = Document.gql("WHERE ANCESTOR IS :1", self).fetch(1000)
+		#documents.extend(Document.gql("WHERE user_emails = :1", self.user.email()).fetch(1000))
+		#documents.sort(key=operator.attrgetter('name'))
+		#return documents
 
 	def get_edits_with_unresolved_conflicts(self):
 		return Edit.gql("WHERE account = :1 AND conflicts_resolved = :2 ORDER BY created DESC", self, False)
@@ -474,22 +475,22 @@ class ClientHandler(webapp.RequestHandler):
 class DocumentsHandler(webapp.RequestHandler):
 	@require_account
 	def get(self, account):
-		json = memcache.get(account.user.email())
+		#json = memcache.get(account.user.email())
 
-		if json is None:
-			document_dicts = []
-			for document in account.get_documents():
-				document_dicts.append(document.to_index_dictionary())
-			json = simplejson.dumps(document_dicts)
-			memcache.set(account.user.email(), json)
+		#if json is None:
+		#	document_dicts = []
+		#	for document in account.get_documents():
+		#		document_dicts.append(document.to_index_dictionary())
+		#	json = simplejson.dumps(document_dicts)
+		#	memcache.set(account.user.email(), json)
 
-		self.response.headers['Content-Type'] = 'application/json'
-		self.response.out.write(json)
+		#self.response.headers['Content-Type'] = 'application/json'
+		#self.response.out.write(json)
 
-		#document_dicts = []
-		#for document in account.get_documents():
-		#	document_dicts.append(document.to_index_dictionary())
-		#write_json_response(self.response, document_dicts)
+		document_dicts = []
+		for document in account.get_documents():
+			document_dicts.append(document.to_index_dictionary())
+		write_json_response(self.response, document_dicts)
 	
 	@require_account
 	def post(self, account):
@@ -512,7 +513,7 @@ class DocumentsHandler(webapp.RequestHandler):
 		
 		try:
 			document = db.run_in_transaction(txn)
-			document.clearMemcache()
+			#document.clearMemcache()
 		except db.TransactionFailedError:
 			self.error(503)
 			return
@@ -597,7 +598,7 @@ class DocumentHandler(webapp.RequestHandler):
 					
 		try:
 			document_account, document, edit = db.run_in_transaction(post_document_edit, self, user_account, document_account.key().id(), document.key().id(), version, name, tags_added, tags_removed, user_emails_added, user_emails_removed, patches)
-			document.clearMemcache(user_emails_removed)
+			#document.clearMemcache(user_emails_removed)
 			document_edits = document.get_edits_in_json_read_form(version, document.version)
 			document_edits['content'] = document.content
 			if edit.conflicts:
@@ -632,7 +633,7 @@ class DocumentHandler(webapp.RequestHandler):
 
 		try:
 			document = db.run_in_transaction(txn)
-			document.clearMemcache()
+			#document.clearMemcache()
 		except ValueError:
 			pass
 		except db.TransactionFailedError:
@@ -669,7 +670,7 @@ class DocumentEditsHandler(webapp.RequestHandler):
 			
 		try:
 			document_account, document, edit = db.run_in_transaction(post_document_edit, self, user_account, document_account_id, document_id, version, name, tags_added, tags_removed, user_emails_added, user_emails_removed, patches)			
-			document.clearMemcache(user_emails_removed)
+			#document.clearMemcache(user_emails_removed)
 			document_edits = document.get_edits_in_json_read_form(version + 1, document.version)
 			if edit.conflicts:
 				document_edits["conflicts"] = edit.conflicts
