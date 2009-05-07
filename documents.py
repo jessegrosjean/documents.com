@@ -51,7 +51,7 @@ class Account(db.Model):
 		return self.user == other.user if isinstance(other, Account) else False
 		
 	def get_documents(self):
-		return Document.gql("WHERE ANCESTOR IS :1 ORDER BY name", self)
+		return Document.gql("WHERE ANCESTOR IS :1 AND deleted = :2 ORDER BY name", self, False)
 		#documents = Document.gql("WHERE ANCESTOR IS :1", self).fetch(1000)
 		#documents.extend(Document.gql("WHERE user_emails = :1", self.user.email()).fetch(1000))
 		#documents.sort(key=operator.attrgetter('name'))
@@ -63,6 +63,7 @@ class Account(db.Model):
 class Document(db.Model):
 	version = db.IntegerProperty(required=True)
 	name = db.StringProperty(required=True)
+	name_version = db.IntegerProperty(default=0)
 	edits_size = db.IntegerProperty(required=True)
 	edits_cache_modulo = db.IntegerProperty(required=True)
 	created = db.DateTimeProperty(required=True, auto_now_add=True)
@@ -70,6 +71,7 @@ class Document(db.Model):
 	tags = db.StringListProperty()
 	user_emails = db.StringListProperty()
 	content = db.TextProperty()
+	deleted = db.BooleanProperty(default=False)
 	
 	def id_string(self):
 		return "%s-%s" % (self.parent_key().id(), self.key().id())
@@ -216,9 +218,6 @@ class Edit(db.Model):
 		if self.patches: content = dmp.patch_apply(dmp.patch_reverse(dmp.patch_fromText(self.patches.encode('ascii'))), content)[0]
 		return (name, tags, user_emails, content)
 
-class Deleted(db.Model):
-	document_key = db.StringProperty(required=True)
-
 #
 # Controllers
 #
@@ -257,7 +256,7 @@ def require_document(f):
 		document_account_id = a[2]
 		document_id = a[3]
 		document, document_account = get_document_and_document_account(handler, user_account, document_account_id, document_id)
-		if document == None or document_account == None:
+		if document == None or document.deleted or document_account == None:
 			return stop_processing 
 			
 		new_args = (handler, user_account, document_account, document) + a[4:]
@@ -329,7 +328,7 @@ def get_document_and_document_account(handler, user_account, document_account_id
 		document = None
 		document_account = None
 
-	if document == None or document_account == None:
+	if document == None or document.deleted or document_account == None:
 		handler.error(404)
 		return None, None
 	elif not (document.parent() == user_account or user_account.user.email() in document.user_emails):
@@ -424,10 +423,14 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 		edit.patches = patches
 		document.content = content
 
-	if (name != None and name != document.name and version == document.version):
-		edit.old_name = document.name
-		edit.new_name = name
-		document.name = name
+	if (name != None and name != document.name):
+		if version >= document.name_version:
+			edit.old_name = document.name
+			edit.new_name = name
+			document.name = name
+			document.name_version = edit.version;
+		else:
+			name = document.name
 	
 	if len(tags_added) > 0:
 		edit.tags_added = tags_added
@@ -458,7 +461,7 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 	edit.put()
 	document_account.put()
 	
-	return document_account, document, edit
+	return document_account, document, edit, name
 
 class ClientHandler(webapp.RequestHandler):
 	def get(self):
@@ -597,10 +600,14 @@ class DocumentHandler(webapp.RequestHandler):
 			user_emails_removed = list_minus(version_user_emails, user_emails)
 					
 		try:
-			document_account, document, edit = db.run_in_transaction(post_document_edit, self, user_account, document_account.key().id(), document.key().id(), version, name, tags_added, tags_removed, user_emails_added, user_emails_removed, patches)
+			document_account, document, edit, name = db.run_in_transaction(post_document_edit, self, user_account, document_account.key().id(), document.key().id(), version, name, tags_added, tags_removed, user_emails_added, user_emails_removed, patches)
 			#document.clearMemcache(user_emails_removed)
 			document_edits = document.get_edits_in_json_read_form(version, document.version)
 			document_edits['content'] = document.content
+			
+			if name:
+				document_edits['name'] = name;
+			
 			if edit.conflicts:
 				document_edits["conflicts"] = edit.conflicts
 				
@@ -624,11 +631,10 @@ class DocumentHandler(webapp.RequestHandler):
 			if version != document.version:
 				self.error(409)
 				raise ValueError, "Version does not match document version"
-			deleted = Deleted(parent=document.parent_key(), document_key=str(document.key()))
-			document_account.documents_size -= document.edits_size
-			deleted.put()
-			document.delete()
-			document_account.put()
+			document.deleted = True
+			document.put()
+			#document_account.documents_size -= document.edits_size
+			#document_account.put()
 			return document
 
 		try:
@@ -669,9 +675,13 @@ class DocumentEditsHandler(webapp.RequestHandler):
 			return
 			
 		try:
-			document_account, document, edit = db.run_in_transaction(post_document_edit, self, user_account, document_account_id, document_id, version, name, tags_added, tags_removed, user_emails_added, user_emails_removed, patches)			
+			document_account, document, edit, name = db.run_in_transaction(post_document_edit, self, user_account, document_account_id, document_id, version, name, tags_added, tags_removed, user_emails_added, user_emails_removed, patches)			
 			#document.clearMemcache(user_emails_removed)
 			document_edits = document.get_edits_in_json_read_form(version + 1, document.version)
+			
+			if name:
+				document_edits['name'] = name;
+			
 			if edit.conflicts:
 				document_edits["conflicts"] = edit.conflicts
 			write_json_response(self.response, document_edits)
@@ -715,13 +725,14 @@ class DocumentEditHandler(webapp.RequestHandler):
 		
 class DocumentsCronHandler(webapp.RequestHandler):
 	def get(self):
-		to_delete = []
-		for deleted in Deleted.all().fetch(10):
-			edits = Edit.gql('WHERE ANCESTOR IS :document', document=deleted.document_key).fetch(10)
-			to_delete.extend(edits)
-			if (len(edits) < 10):
-				to_delete.append(deleted)
-		db.delete(to_delete)
+		pass
+		#to_delete = []
+		#for deleted in Deleted.all().fetch(10):
+		#	edits = Edit.gql('WHERE ANCESTOR IS :document', document=deleted.document_key).fetch(10)
+		#	to_delete.extend(edits)
+		#	if (len(edits) < 10):
+		#		to_delete.append(deleted)
+		#db.delete(to_delete)
 
 def main():
 	application = webapp.WSGIApplication([
