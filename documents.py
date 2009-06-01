@@ -62,16 +62,16 @@ class Account(db.Model):
 
 class Document(db.Model):
 	version = db.IntegerProperty(required=True)
-	name = db.StringProperty(required=True)
-	name_version = db.IntegerProperty(default=0)
-	edits_size = db.IntegerProperty(required=True)
-	edits_cache_modulo = db.IntegerProperty(required=True)
+	name = db.StringProperty(required=True, default="Untitled")
+	name_version = db.IntegerProperty(required=True, default=0)
+	edits_size = db.IntegerProperty(required=True, default=0)
+	edits_cache_modulo = db.IntegerProperty(required=True, default=10)
 	created = db.DateTimeProperty(required=True, auto_now_add=True)
 	modified = db.DateTimeProperty(required=True, auto_now=True)
 	tags = db.StringListProperty()
 	user_emails = db.StringListProperty()
 	content = db.TextProperty()
-	deleted = db.BooleanProperty(default=False)
+	deleted = db.BooleanProperty(required=True, default=False)
 	
 	def id_string(self):
 		return "%s-%s" % (self.parent_key().id(), self.key().id())
@@ -350,6 +350,7 @@ def get_document_version(handler, document, version):
 		edit = Edit.gql('WHERE ANCESTOR IS :document AND version = :version', document=document, version=version).get()
 		return (edit.cached_document_name, edit.cached_document_tags, edit.cached_document_user_emails, edit.cached_document_content)
 	else:
+		# XXX rewrite these queries so that version is ordered the same in both. That will save the building of one index.
 		if modulo > (document.edits_cache_modulo / 2):
 			base_version = (version - modulo) + document.edits_cache_modulo
 			edits_query = 'WHERE ANCESTOR IS :document AND version > :version AND version <= :base_version ORDER BY version DESC'
@@ -726,6 +727,9 @@ class DocumentEditHandler(webapp.RequestHandler):
 class DocumentsCronHandler(webapp.RequestHandler):
 	def get(self):
 		pass
+		#for document in Document.all().fetch(1000):
+		#	document.name_version = 0
+		#	document.put()
 		#to_delete = []
 		#for deleted in Deleted.all().fetch(10):
 		#	edits = Edit.gql('WHERE ANCESTOR IS :document', document=deleted.document_key).fetch(10)
