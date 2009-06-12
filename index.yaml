@@ -10,7 +10,7 @@ indexes:
 # automatically uploaded to the admin console when you next deploy
 # your application using appcfg.py.
 
-# Used 304 times in query history.
+# Used 11 times in query history.
 - kind: Document
   ancestor: yes
   properties:
@@ -25,7 +25,7 @@ indexes:
   - name: created
     direction: desc
 
-# Used 189 times in query history.
+# Used 2 times in query history.
 - kind: Edit
   ancestor: yes
   properties:
