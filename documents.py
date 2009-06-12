@@ -13,6 +13,7 @@ from google.appengine.api import users
 from google.appengine.ext import webapp
 from google.appengine.api import memcache
 from google.appengine.ext.webapp import template
+from google.appengine.runtime import DeadlineExceededError 
 
 #
 # Models
@@ -500,7 +501,7 @@ class DocumentsHandler(webapp.RequestHandler):
 	def post(self, account):
 		jsonDocument = simplejson.loads(self.request.body)
 		name = jsonDocument.get('name')
-		name = 'Untitled' if name == None or len(name) == 0 else name
+		name = 'Untitled' if name == None or len(name) == 0 else re.split(r"(\r\n|\r|\n)", name, 1)[0]
 		tags = list_from_string(jsonDocument.get('tags'))
 		user_emails = list_from_string(jsonDocument.get('user_emails'))
 		content = jsonDocument.get('content', '')			
@@ -567,7 +568,7 @@ class DocumentHandler(webapp.RequestHandler):
 		version = jsonDocument.get('version')
 		version = None if version == None else int(version)
 		name = jsonDocument.get('name')
-		name = 'Untitled' if name == None or len(name) == 0 else name
+		name = 'Untitled' if name == None or len(name) == 0 else re.split(r"(\r\n|\r|\n)", name, 1)[0]
 		tags = list_from_string(jsonDocument.get('tags'))
 		user_emails = list_from_string(jsonDocument.get('user_emails'))
 		content = jsonDocument.get('content', None)			
@@ -659,6 +660,7 @@ class DocumentEditsHandler(webapp.RequestHandler):
 		jsonDocument = simplejson.loads(self.request.body)
 		version = jsonDocument.get('version', None)
 		name = jsonDocument.get('name', None)
+		name = None if name == None or len(name) == 0 else re.split(r"(\r\n|\r|\n)", name, 1)[0]
 		tags_added = list_from_string(jsonDocument.get('tags_added', None))
 		tags_removed = list_from_string(jsonDocument.get('tags_removed', None))
 		user_emails_added = list_from_string(jsonDocument.get('user_emails_added', None))
@@ -688,6 +690,9 @@ class DocumentEditsHandler(webapp.RequestHandler):
 			write_json_response(self.response, document_edits)
 		except db.TransactionFailedError:
 			self.error(503)
+		except DeadlineExceededError:
+			logging.error('Patching Error document_account_id: %s document_id: %s version: %s patches: %s' % (document_account_id, document_id, version, patches))
+			self.error(500)			
 
 class DocumentEditHandler(webapp.RequestHandler):
 	@require_document_edit
