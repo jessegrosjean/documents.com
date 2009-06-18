@@ -10,14 +10,14 @@ indexes:
 # automatically uploaded to the admin console when you next deploy
 # your application using appcfg.py.
 
-# Used 66 times in query history.
+# Used 13 times in query history.
 - kind: Document
   ancestor: yes
   properties:
   - name: deleted
   - name: name
 
-# Used 2 times in query history.
+# Unused in query history -- copied from input.
 - kind: Edit
   properties:
   - name: account
@@ -25,7 +25,7 @@ indexes:
   - name: created
     direction: desc
 
-# Used 9 times in query history.
+# Unused in query history -- copied from input.
 - kind: Edit
   ancestor: yes
   properties:

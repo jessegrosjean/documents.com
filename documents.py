@@ -33,17 +33,22 @@ def list_from_string(string):
 
 class Account(db.Model):
 	user = db.UserProperty(required=True)
+	user_id = db.StringProperty()
 	documents_size = db.IntegerProperty(required=True)
 
 	@classmethod
 	def get_account_for_user(cls, user):
 		if user:
-			account = Account.gql("WHERE user = :1", user).get()
+			account = Account.gql("WHERE user_id = :1", user.user_id()).get()			
 			if account == None:
-				account = Account(user=user, documents_size=0)
+				account = Account.gql("WHERE user = :1", user).get()
+							
+			if account == None:
+				account = Account(user=user, user_id=user.user_id(), documents_size=0)
 				account.put()
 			else:
 				account.user = user
+				account.user_id = user.user_id()
 				account.put()
 			return account
 		return None
@@ -732,6 +737,10 @@ class DocumentEditHandler(webapp.RequestHandler):
 class DocumentsCronHandler(webapp.RequestHandler):
 	def get(self):
 		pass
+		#for account in Account.all().fetch(1000):
+		#	user = account.user
+		#	account.user_id = user.user_id()
+		#	account.put()
 		#for document in Document.all().fetch(1000):
 		#	document.name_version = 0
 		#	document.put()
