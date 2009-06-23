@@ -13,7 +13,6 @@ from google.appengine.api import users
 from google.appengine.ext import webapp
 from google.appengine.api import memcache
 from google.appengine.ext.webapp import template
-from google.appengine.runtime import DeadlineExceededError 
 
 #
 # Models
@@ -81,7 +80,7 @@ class Document(db.Model):
 	
 	def id_string(self):
 		return "%s-%s" % (self.parent_key().id(), self.key().id())
-		
+				
 	def tags_string(self):
 		if len(self.tags) > 0:
 			return ' '.join(self.tags)
@@ -100,6 +99,9 @@ class Document(db.Model):
 	def uri(self):
 		return "/documents/%s" % self.id_string()
 
+	def get_body(self):
+		return Body.gql("WHERE ANCESTOR IS :1", self).get()
+		
 	def get_edits(self, start, end, sequence="ASC"):
 		return Edit.gql('WHERE ANCESTOR IS :document AND version >= :start AND version <= :end ORDER BY version %s' % sequence, document=self, start=start, end=end).fetch((end - start) + 1)
 
@@ -164,6 +166,9 @@ class Document(db.Model):
 		keys.extend(removed_emails)
 		keys.extend(self.user_emails)
 		memcache.delete_multi(keys)		
+
+class Body(db.Model):
+	content = db.TextProperty()
 
 class Edit(db.Model):
 	account = db.ReferenceProperty(Account, required=True)
@@ -405,10 +410,12 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 		return None, None, None
 		
 	dmp = diff_match_patch()
+	body = document.get_body()
 	edit = Edit(parent=document, account=user_account, version=document.version + 1)
+	puts = [document, edit, document_account]
 	conflicts = []
 	content = None
-
+	
 	if (patches != None):
 		dmp.Match_Threshold = 1.0
 		patches = dmp.patch_fromText(patches)
@@ -429,6 +436,11 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 		patches = dmp.patch_toText(patches)
 		edit.patches = patches
 		document.content = content
+		if body:
+			body.content = content
+			puts.append(body)
+		else:
+			logging.error("expected body for document %s" % document.id_string())
 
 	if (name != None and name != document.name):
 		if version >= document.name_version:
@@ -464,9 +476,8 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 	document.version = edit.version
 	document.edits_size += edit.size()
 	document_account.documents_size += edit.size()
-	document.put()
-	edit.put()
-	document_account.put()
+	
+	db.put(puts)
 	
 	return document_account, document, edit, name
 
@@ -493,10 +504,6 @@ class DocumentsHandler(webapp.RequestHandler):
 		#		document_dicts.append(document.to_index_dictionary())
 		#	json = simplejson.dumps(document_dicts)
 		#	memcache.set(account.user.email(), json)
-
-		#self.response.headers['Content-Type'] = 'application/json'
-		#self.response.out.write(json)
-
 		document_dicts = []
 		for document in account.get_documents():
 			document_dicts.append(document.to_index_dictionary())
@@ -516,9 +523,9 @@ class DocumentsHandler(webapp.RequestHandler):
 			document = Document(parent=account, version=0, edits_size=len(name) + len(content), edits_cache_modulo=10, name=name, tags=tags, user_emails=user_emails, content=content)
 			document.put()
 			edit = Edit(parent=document, account=account, version=0, new_name=name, tags_added=tags, user_emails_added=user_emails, cached_document_name=name, cached_document_content=content)
-			edit.put()
+			body = Body(parent=document, content=content)
 			account.documents_size += document.edits_size
-			account.put()
+			db.put([edit, body, account])
 			return document
 		
 		try:
@@ -638,8 +645,9 @@ class DocumentHandler(webapp.RequestHandler):
 			if version != document.version:
 				self.error(409)
 				raise ValueError, "Version does not match document version"
+
 			document.deleted = True
-			document.put()
+			db.put([document, document_account])
 			#document_account.documents_size -= document.edits_size
 			#document_account.put()
 			return document
@@ -695,9 +703,6 @@ class DocumentEditsHandler(webapp.RequestHandler):
 			write_json_response(self.response, document_edits)
 		except db.TransactionFailedError:
 			self.error(503)
-		except DeadlineExceededError:
-			logging.error('Patching Error document_account_id: %s document_id: %s version: %s patches: %s' % (document_account_id, document_id, version, patches))
-			self.error(500)			
 
 class DocumentEditHandler(webapp.RequestHandler):
 	@require_document_edit
@@ -733,10 +738,28 @@ class DocumentEditHandler(webapp.RequestHandler):
 			edit.conflicts_resolved = False
 			
 		edit.put()
-		
+
 class DocumentsCronHandler(webapp.RequestHandler):
 	def get(self):
 		pass
+		#puts = []
+	 	#count = 0
+	
+		#for document in Document.gql("WHERE deleted = :1", True):
+		#	document.name_version = 0
+		#	body = document.get_body()
+		#	if not body:
+		#		body = Body(parent=document, content=document.content)
+		#		puts.append(body)
+		#		count += 1
+		#	
+		#	if count > 10:
+		#		count = 0
+		#		db.put(puts)
+		#		puts = []
+		
+		#db.put(puts)
+
 		#for account in Account.all().fetch(1000):
 		#	user = account.user
 		#	account.user_id = user.user_id()
