@@ -77,6 +77,7 @@ class Document(db.Model):
 	user_emails = db.StringListProperty()
 	content = db.TextProperty()
 	deleted = db.BooleanProperty(required=True, default=False)
+	body = None
 	
 	def id_string(self):
 		return "%s-%s" % (self.parent_key().id(), self.key().id())
@@ -100,7 +101,9 @@ class Document(db.Model):
 		return "/documents/%s" % self.id_string()
 
 	def get_body(self):
-		return Body.gql("WHERE ANCESTOR IS :1", self).get()
+		if not self.body:
+			self.body = Body.gql("WHERE ANCESTOR IS :1", self).get()
+		return self.body
 		
 	def get_edits(self, start, end, sequence="ASC"):
 		return Edit.gql('WHERE ANCESTOR IS :document AND version >= :start AND version <= :end ORDER BY version %s' % sequence, document=self, start=start, end=end).fetch((end - start) + 1)
@@ -158,7 +161,7 @@ class Document(db.Model):
 		return { 'id': self.id_string(), 'version': self.version, 'name': self.name }
 
 	def to_document_dictionary(self):
-		return { 'owner' : self.parent().user.email(), 'id': self.id_string(), 'name': self.name, 'version': self.version, 'content': self.content, 'created': str(self.created), 'modified': str(self.modified) }
+		return { 'owner' : self.parent().user.email(), 'id': self.id_string(), 'name': self.name, 'version': self.version, 'content': self.get_body().content, 'created': str(self.created), 'modified': str(self.modified) }
 	
 	def clearMemcache(self, removed_emails=[]):
 		keys = []
@@ -350,7 +353,7 @@ def get_document_and_document_account(handler, user_account, document_account_id
 
 def get_document_version(handler, document, version):
 	if version == document.version:
-		return (document.name, document.tags, document.user_emails, document.content)
+		return (document.name, document.tags, document.user_emails, document.get_body().content)
 	elif version > document.version:
 		handler.error(404)
 		return (None, None, None, None)
@@ -398,7 +401,7 @@ def get_document_version(handler, document, version):
 						base_name = document.name
 						base_tags = document.tags[:]
 						base_user_emails = document.user_emails[:]
-						base_content = document.content
+						base_content = document.get_body().content
 
 				base_name, base_tags, base_user_emails, base_content = edit.reverse(base_name, base_tags, base_user_emails, base_content, dmp)
 
@@ -419,7 +422,7 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 	if (patches != None):
 		dmp.Match_Threshold = 1.0
 		patches = dmp.patch_fromText(patches)
-		results = dmp.patch_apply(patches, document.content)
+		results = dmp.patch_apply(patches, body.content)
 		content = results[0]
 		index = 0
 		for result in results[1]:
@@ -431,16 +434,13 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 		edit.conflicts = ''.join(conflicts)
 		edit.conflicts_resolved = False
 	
-	if (content != None and content != document.content):
-		patches = dmp.patch_make(document.content, content)
+	if (content != None and content != body.content):
+		patches = dmp.patch_make(body.content, content)
 		patches = dmp.patch_toText(patches)
 		edit.patches = patches
 		document.content = content
-		if body:
-			body.content = content
-			puts.append(body)
-		else:
-			logging.error("expected body for document %s" % document.id_string())
+		body.content = content
+		puts.append(body)
 
 	if (name != None and name != document.name):
 		if version >= document.name_version:
@@ -471,7 +471,7 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 		edit.cached_document_name = document.name
 		edit.cached_document_tags = document.tags
 		edit.cached_document_user_emails = document.user_emails
-		edit.cached_document_content = document.content
+		edit.cached_document_content = body.content
 		
 	document.version = edit.version
 	document.edits_size += edit.size()
@@ -479,7 +479,7 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 	
 	db.put(puts)
 	
-	return document_account, document, edit, name
+	return document_account, document, body, edit, name
 
 class ClientHandler(webapp.RequestHandler):
 	def get(self):
@@ -614,10 +614,10 @@ class DocumentHandler(webapp.RequestHandler):
 			user_emails_removed = list_minus(version_user_emails, user_emails)
 					
 		try:
-			document_account, document, edit, name = db.run_in_transaction(post_document_edit, self, user_account, document_account.key().id(), document.key().id(), version, name, tags_added, tags_removed, user_emails_added, user_emails_removed, patches)
+			document_account, document, body, edit, name = db.run_in_transaction(post_document_edit, self, user_account, document_account.key().id(), document.key().id(), version, name, tags_added, tags_removed, user_emails_added, user_emails_removed, patches)
 			#document.clearMemcache(user_emails_removed)
 			document_edits = document.get_edits_in_json_read_form(version, document.version)
-			document_edits['content'] = document.content
+			document_edits['content'] = body.content
 			
 			if name:
 				document_edits['name'] = name;
@@ -691,7 +691,7 @@ class DocumentEditsHandler(webapp.RequestHandler):
 			return
 			
 		try:
-			document_account, document, edit, name = db.run_in_transaction(post_document_edit, self, user_account, document_account_id, document_id, version, name, tags_added, tags_removed, user_emails_added, user_emails_removed, patches)			
+			document_account, document, body, edit, name = db.run_in_transaction(post_document_edit, self, user_account, document_account_id, document_id, version, name, tags_added, tags_removed, user_emails_added, user_emails_removed, patches)			
 			#document.clearMemcache(user_emails_removed)
 			document_edits = document.get_edits_in_json_read_form(version + 1, document.version)
 			
