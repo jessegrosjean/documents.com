@@ -438,7 +438,6 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 		patches = dmp.patch_make(body.content, content)
 		patches = dmp.patch_toText(patches)
 		edit.patches = patches
-		document.content = content
 		body.content = content
 		puts.append(body)
 
@@ -520,7 +519,7 @@ class DocumentsHandler(webapp.RequestHandler):
 		content = re.sub(r"(\r\n|\r)", "\n", content) # Normalize line endings
 
 		def txn():
-			document = Document(parent=account, version=0, edits_size=len(name) + len(content), edits_cache_modulo=10, name=name, tags=tags, user_emails=user_emails, content=content)
+			document = Document(parent=account, version=0, edits_size=len(name) + len(content), edits_cache_modulo=10, name=name, tags=tags, user_emails=user_emails)
 			document.put()
 			edit = Edit(parent=document, account=account, version=0, new_name=name, tags_added=tags, user_emails_added=user_emails, cached_document_name=name, cached_document_content=content)
 			body = Body(parent=document, content=content)
@@ -744,15 +743,10 @@ class DocumentsCronHandler(webapp.RequestHandler):
 		pass
 		#puts = []
 	 	#count = 0
-	
-		#for document in Document.gql("WHERE deleted = :1", True):
-		#	document.name_version = 0
-		#	body = document.get_body()
-		#	if not body:
-		#		body = Body(parent=document, content=document.content)
-		#		puts.append(body)
-		#		count += 1
-		#	
+		
+		#for document in Document.gql('WHERE content != :1', None).fetch(500):
+		#	document.content = None
+		#	puts.append(document)
 		#	if count > 10:
 		#		count = 0
 		#		db.put(puts)
@@ -775,7 +769,7 @@ class DocumentsCronHandler(webapp.RequestHandler):
 		#		to_delete.append(deleted)
 		#db.delete(to_delete)
 
-def main():
+def real_main():
 	application = webapp.WSGIApplication([
 		('/documents', ClientHandler),
 		('/documents/', ClientHandler),
@@ -790,5 +784,20 @@ def main():
 		
 	wsgiref.handlers.CGIHandler().run(application)
 
+def profile_main():
+	# This is the main function for profiling 
+	# We've renamed our original main() above to real_main()
+	import cProfile, pstats, StringIO
+	prof = cProfile.Profile()
+	prof = prof.runctx("real_main()", globals(), locals())
+	stream = StringIO.StringIO()
+	stats = pstats.Stats(prof, stream=stream)
+	stats.sort_stats("time")  # Or cumulative
+	stats.print_stats(80)  # 80 = how many to print
+	# The rest is optional.
+	# stats.print_callees()
+	# stats.print_callers()
+	logging.info("Profile data:\n%s", stream.getvalue())
+
 if __name__ == '__main__':
-	main()
+	real_main()
