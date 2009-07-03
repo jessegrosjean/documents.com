@@ -163,8 +163,9 @@ class Document(db.Model):
 	def to_document_dictionary(self):
 		return { 'owner' : self.parent().user.email(), 'id': self.id_string(), 'name': self.name, 'version': self.version, 'content': self.get_body().content, 'created': str(self.created), 'modified': str(self.modified) }
 	
-	def clearMemcache(self, removed_ids=[]):
-		memcache.delete_multi(self.user_ids)		
+	def clearMemcache(self, clear_ids=[]):
+		clear_ids.extend(self.user_ids)
+		memcache.delete_multi(clear_ids)
 
 class Body(db.Model):
 	content = db.TextProperty()
@@ -493,18 +494,24 @@ class ClientHandler(webapp.RequestHandler):
 class DocumentsHandler(webapp.RequestHandler):
 	@require_account
 	def get(self, account):
-		#json = memcache.get(account.user.email())
+		cache_key = account.user.user_id()
+		cached_response = memcache.get(cache_key)
 
-		#if json is None:
+		if cached_response is None:
+			document_dicts = []
+			for document in account.get_documents():
+				document_dicts.append(document.to_index_dictionary())			
+			cached_response = simplejson.dumps(document_dicts)
+			memcache.set(cache_key, cached_response)
+
+		self.response.headers['Content-Type'] = 'application/json'
+		self.response.out.write(cached_response)
+
 		#	document_dicts = []
 		#	for document in account.get_documents():
 		#		document_dicts.append(document.to_index_dictionary())
 		#	json = simplejson.dumps(document_dicts)
 		#	memcache.set(account.user.email(), json)
-		document_dicts = []
-		for document in account.get_documents():
-			document_dicts.append(document.to_index_dictionary())
-		write_json_response(self.response, document_dicts)
 	
 		# changes_since = jsonDocument.get('changes_since')
 		# Allow client to pass in changes since value. this way even if they have 1000 documents the size of
@@ -534,7 +541,7 @@ class DocumentsHandler(webapp.RequestHandler):
 		
 		try:
 			document = db.run_in_transaction(txn)
-			#document.clearMemcache()
+			document.clearMemcache()
 		except db.TransactionFailedError:
 			self.error(503)
 			return
@@ -619,7 +626,7 @@ class DocumentHandler(webapp.RequestHandler):
 					
 		try:
 			document_account, document, body, edit, name = db.run_in_transaction(post_document_edit, self, user_account, document_account.key().id(), document.key().id(), version, name, tags_added, tags_removed, user_ids_added, user_ids_removed, patches)
-			#document.clearMemcache(user_ids_removed)
+			document.clearMemcache(user_ids_removed)
 			document_edits = document.get_edits_in_json_read_form(version, document.version)
 			document_edits['content'] = body.content
 			
@@ -658,7 +665,7 @@ class DocumentHandler(webapp.RequestHandler):
 
 		try:
 			document = db.run_in_transaction(txn)
-			#document.clearMemcache()
+			document.clearMemcache()
 		except ValueError:
 			pass
 		except db.TransactionFailedError:
@@ -696,7 +703,7 @@ class DocumentEditsHandler(webapp.RequestHandler):
 			
 		try:
 			document_account, document, body, edit, name = db.run_in_transaction(post_document_edit, self, user_account, document_account_id, document_id, version, name, tags_added, tags_removed, user_ids_added, user_ids_removed, patches)			
-			#document.clearMemcache(user_ids_removed)
+			document.clearMemcache(user_ids_removed)
 			document_edits = document.get_edits_in_json_read_form(version + 1, document.version)
 			
 			if name:
