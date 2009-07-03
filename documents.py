@@ -30,6 +30,19 @@ def list_from_string(string):
 	else:
 		return []
 
+def user_id_for_user(user):
+	user_id = user.user_id()
+	if not user_id:
+		return user.email()
+	return user_id
+
+def list_with_user_id(l, user_id):
+	try:
+		l.index(user_id)
+	except ValueError:
+		l.append(user_id)
+	return l
+
 class Account(db.Model):
 	user = db.UserProperty(required=True)
 	user_id = db.StringProperty()
@@ -38,16 +51,16 @@ class Account(db.Model):
 	@classmethod
 	def get_account_for_user(cls, user):
 		if user:
-			account = Account.gql("WHERE user_id = :1", user.user_id()).get()			
+			account = Account.gql("WHERE user_id = :1", user_id_for_user(user)).get()			
 			if account == None:
 				account = Account.gql("WHERE user = :1", user).get()
 							
 			if account == None:
-				account = Account(user=user, user_id=user.user_id(), documents_size=0)
+				account = Account(user=user, user_id=user_id_for_user(user), documents_size=0)
 				account.put()
 			else:
 				account.user = user
-				account.user_id = user.user_id()
+				account.user_id = user_id_for_user(user)
 				account.put()
 			return account
 		return None
@@ -56,11 +69,8 @@ class Account(db.Model):
 		return self.user == other.user if isinstance(other, Account) else False
 		
 	def get_documents(self):
-		return Document.gql("WHERE ANCESTOR IS :1 AND deleted = :2 ORDER BY name", self, False)
-		#documents = Document.gql("WHERE ANCESTOR IS :1", self).fetch(1000)
-		#documents.extend(Document.gql("WHERE user_emails = :1", self.user.email()).fetch(1000))
-		#documents.sort(key=operator.attrgetter('name'))
-		#return documents
+		#return Document.gql("WHERE ANCESTOR IS :1 AND deleted = :2 ORDER BY name", self, False)
+		return Document.gql("WHERE user_ids = :1 AND deleted = :2 ORDER BY name", self.user_id, False)
 
 	def get_edits_with_unresolved_conflicts(self):
 		return Edit.gql("WHERE account = :1 AND conflicts_resolved = :2 ORDER BY created DESC", self, False)
@@ -74,8 +84,7 @@ class Document(db.Model):
 	created = db.DateTimeProperty(required=True, auto_now_add=True)
 	modified = db.DateTimeProperty(required=True, auto_now=True)
 	tags = db.StringListProperty()
-	user_emails = db.StringListProperty()
-	content = db.TextProperty()
+	user_ids = db.StringListProperty()
 	deleted = db.BooleanProperty(required=True, default=False)
 	body = None
 	
@@ -88,15 +97,12 @@ class Document(db.Model):
 		else:
 			return ""
 
-	def user_emails_string(self):
-		if len(self.user_emails) > 0:
-			return ' '.join(self.user_emails)
+	def user_ids_string(self):
+		if len(self.user_ids) > 0:
+			return ' '.join(self.user_ids)
 		else:
 			return ""
 	
-	def owner_email(self):
-		return self.parent().user.email()
-		
 	def uri(self):
 		return "/documents/%s" % self.id_string()
 
@@ -108,20 +114,14 @@ class Document(db.Model):
 	def get_edits(self, start, end, sequence="ASC"):
 		return Edit.gql('WHERE ANCESTOR IS :document AND version >= :start AND version <= :end ORDER BY version %s' % sequence, document=self, start=start, end=end).fetch((end - start) + 1)
 
-	def get_account_emails(self):
-		emails = []
-		emails.append(self.owner_email)
-		emails.extend(self.user_emails)
-		return emails
-		
 	def get_edits_in_json_read_form(self, start, end):
 		edits = {}
 
 		name = None
 		tags_added = []
 		tags_removed = []
-		user_emails_added = []
-		user_emails_removed = []
+		user_ids_added = []
+		user_ids_removed = []
 		patches = []
 		
 		for edit in self.get_edits(start, end):
@@ -138,13 +138,13 @@ class Document(db.Model):
 				tags_removed = list_union(tags_removed, edit.tags_removed)
 				tags_added = list_minus(tags_added, edit.tags_removed)
 
-			if len(edit.user_emails_added) > 0:
-				user_emails_added = list_union(user_emails_added, edit.user_emails_added)
-				user_emails_removed = list_minus(user_emails_removed, edit.user_emails_added)
+			if len(edit.user_ids_added) > 0:
+				user_ids_added = list_union(user_ids_added, edit.user_ids_added)
+				user_ids_removed = list_minus(user_ids_removed, edit.user_ids_added)
 
-			if len(edit.user_emails_removed) > 0:
-				user_emails_removed = list_union(user_emails_removed, edit.user_emails_removed)
-				user_emails_added = list_minus(user_emails_added, edit.user_emails_removed)
+			if len(edit.user_ids_removed) > 0:
+				user_ids_removed = list_union(user_ids_removed, edit.user_ids_removed)
+				user_ids_added = list_minus(user_ids_added, edit.user_ids_removed)
 								
 			if edit.new_name:
 				name = edit.new_name
@@ -152,8 +152,8 @@ class Document(db.Model):
 		if name: edits["name"] = name
 		if len(tags_added) > 0: edits["tags_added"] = tags_added
 		if len(tags_removed) > 0: edits["tags_removed"] = tags_removed
-		if len(user_emails_added) > 0: edits["user_emails_added"] = user_emails_added
-		if len(user_emails_removed) > 0: edits["user_emails_removed"] = user_emails_removed
+		if len(user_ids_added) > 0: edits["user_ids_added"] = user_ids_added
+		if len(user_ids_removed) > 0: edits["user_ids_removed"] = user_ids_removed
 		if len(patches) > 0: edits["patches"] = ''.join(patches)
 		return edits
 	
@@ -163,15 +163,12 @@ class Document(db.Model):
 	def to_document_dictionary(self):
 		return { 'owner' : self.parent().user.email(), 'id': self.id_string(), 'name': self.name, 'version': self.version, 'content': self.get_body().content, 'created': str(self.created), 'modified': str(self.modified) }
 	
-	def clearMemcache(self, removed_emails=[]):
-		keys = []
-		keys.append(self.owner_email())
-		keys.extend(removed_emails)
-		keys.extend(self.user_emails)
-		memcache.delete_multi(keys)		
+	def clearMemcache(self, removed_ids=[]):
+		memcache.delete_multi(self.user_ids)		
 
 class Body(db.Model):
 	content = db.TextProperty()
+	content_size = db.IntegerProperty()	
 
 class Edit(db.Model):
 	account = db.ReferenceProperty(Account, required=True)
@@ -180,15 +177,15 @@ class Edit(db.Model):
 	new_name = db.StringProperty()
 	tags_added = db.StringListProperty()
 	tags_removed = db.StringListProperty()
-	user_emails_added = db.StringListProperty()
-	user_emails_removed = db.StringListProperty()
+	user_ids_added = db.StringListProperty()
+	user_ids_removed = db.StringListProperty()
 	patches = db.TextProperty()
 	conflicts = db.TextProperty()
 	conflicts_resolved = db.BooleanProperty(default=None)
 	created = db.DateTimeProperty(required=True, auto_now_add=True)
 	cached_document_name = db.StringProperty()
 	cached_document_tags = db.StringListProperty()
-	cached_document_user_emails = db.StringListProperty()
+	cached_document_user_ids = db.StringListProperty()
 	cached_document_content = db.TextProperty()
 		
 	def is_valid(self):
@@ -214,23 +211,23 @@ class Edit(db.Model):
 		if self.conflicts: size += len(self.conflicts)
 		return size
 		
-	def apply(self, name, tags, user_emails, content, dmp):
+	def apply(self, name, tags, user_ids, content, dmp):
 		if self.new_name: name = self.new_name
 		if len(self.tags_added) > 0: tags = list_union(tags, self.tags_added)
 		if len(self.tags_removed) > 0: tags = list_minus(tags, self.tags_removed)
-		if len(self.user_emails_added) > 0: user_emails = list_union(user_emails, self.user_emails_added)
-		if len(self.user_emails_removed) > 0: user_emails = list_minus(user_emails, self.user_emails_removed)
+		if len(self.user_ids_added) > 0: user_ids = list_union(user_ids, self.user_ids_added)
+		if len(self.user_ids_removed) > 0: user_ids = list_minus(user_ids, self.user_ids_removed)
 		if self.patches: content = dmp.patch_apply(dmp.patch_fromText(self.patches.encode('ascii')), content)[0]
-		return (name, tags, user_emails, content)
+		return (name, tags, user_ids, content)
 		
-	def reverse(self, name, tags, user_emails, content, dmp):
+	def reverse(self, name, tags, user_ids, content, dmp):
 		if self.old_name: name = self.old_name
 		if len(self.tags_added) > 0: tags = list_minus(tags, self.tags_added)
 		if len(self.tags_removed) > 0: tags = list_union(tags, self.tags_removed)
-		if len(self.user_emails_added) > 0: user_emails = list_minus(user_emails, self.user_emails_added)
-		if len(self.user_emails_removed) > 0: user_emails = list_union(user_emails, self.user_emails_removed)
+		if len(self.user_ids_added) > 0: user_ids = list_minus(user_ids, self.user_ids_added)
+		if len(self.user_ids_removed) > 0: user_ids = list_union(user_ids, self.user_ids_removed)
 		if self.patches: content = dmp.patch_apply(dmp.patch_reverse(dmp.patch_fromText(self.patches.encode('ascii'))), content)[0]
-		return (name, tags, user_emails, content)
+		return (name, tags, user_ids, content)
 
 #
 # Controllers
@@ -345,7 +342,7 @@ def get_document_and_document_account(handler, user_account, document_account_id
 	if document == None or document.deleted or document_account == None:
 		handler.error(404)
 		return None, None
-	elif not (document.parent() == user_account or user_account.user.email() in document.user_emails):
+	elif not (document.parent() == user_account or user_account.user.user_ids() in document.user_ids):
 		handler.error(401)
 		return None, None
 
@@ -353,7 +350,7 @@ def get_document_and_document_account(handler, user_account, document_account_id
 
 def get_document_version(handler, document, version):
 	if version == document.version:
-		return (document.name, document.tags, document.user_emails, document.get_body().content)
+		return (document.name, document.tags, document.user_ids, document.get_body().content)
 	elif version > document.version:
 		handler.error(404)
 		return (None, None, None, None)
@@ -362,7 +359,7 @@ def get_document_version(handler, document, version):
 
 	if modulo == 0:
 		edit = Edit.gql('WHERE ANCESTOR IS :document AND version = :version', document=document, version=version).get()
-		return (edit.cached_document_name, edit.cached_document_tags, edit.cached_document_user_emails, edit.cached_document_content)
+		return (edit.cached_document_name, edit.cached_document_tags, edit.cached_document_user_ids, edit.cached_document_content)
 	else:
 		# XXX rewrite these queries so that version is ordered the same in both. That will save the building of one index.
 		if modulo > (document.edits_cache_modulo / 2):
@@ -376,7 +373,7 @@ def get_document_version(handler, document, version):
 
 		base_name = None
 		base_tags = None
-		base_user_emails = None
+		base_user_ids = None
 		base_content = None
 		dmp = diff_match_patch()
 		dmp.Match_Threshold = 0.0
@@ -386,28 +383,28 @@ def get_document_version(handler, document, version):
 				if base_name == None:
 					base_name = edit.cached_document_name
 					base_tags = edit.cached_document_tags[:]
-					base_user_emails = edit.cached_document_user_emails[:]
+					base_user_ids = edit.cached_document_user_ids[:]
 					base_content = edit.cached_document_content
 				else:
-					base_name, base_tags, base_user_emails, base_content = edit.apply(base_name, base_tags, base_user_emails, base_content, dmp)
+					base_name, base_tags, base_user_ids, base_content = edit.apply(base_name, base_tags, base_user_ids, base_content, dmp)
 			else:
 				if base_name == None:
 					if edit.version % document.edits_cache_modulo == 0:
 						base_name = edit.cached_document_name
 						base_tags = edit.cached_document_tags[:]
-						base_user_emails = edit.cached_document_user_emails[:]
+						base_user_ids = edit.cached_document_user_ids[:]
 						base_content = edit.cached_document_content
 					else:
 						base_name = document.name
 						base_tags = document.tags[:]
-						base_user_emails = document.user_emails[:]
+						base_user_ids = document.user_ids[:]
 						base_content = document.get_body().content
 
-				base_name, base_tags, base_user_emails, base_content = edit.reverse(base_name, base_tags, base_user_emails, base_content, dmp)
+				base_name, base_tags, base_user_ids, base_content = edit.reverse(base_name, base_tags, base_user_ids, base_content, dmp)
 
-		return (base_name, base_tags, base_user_emails, base_content)
+		return (base_name, base_tags, base_user_ids, base_content)
 
-def post_document_edit(handler, user_account, document_account_id, document_id, version, name, tags_added, tags_removed, user_emails_added, user_emails_removed, patches):
+def post_document_edit(handler, user_account, document_account_id, document_id, version, name, tags_added, tags_removed, user_ids_added, user_ids_removed, patches):
 	document, document_account = get_document_and_document_account(handler, user_account, document_account_id, document_id)
 	if document == None or document_account == None:
 		return None, None, None
@@ -439,6 +436,7 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 		patches = dmp.patch_toText(patches)
 		edit.patches = patches
 		body.content = content
+		body.content_size = len(content)
 		puts.append(body)
 
 	if (name != None and name != document.name):
@@ -458,18 +456,18 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 		edit.tags_removed = tags_removed
 		document.tags = list_minus(document.tags, tags_removed)
 
-	if len(user_emails_added) > 0:
-		edit.user_emails_added = user_emails_added
-		document.user_emails = list_union(document.user_emails, user_emails_added)
+	if len(user_ids_added) > 0:
+		edit.user_ids_added = user_ids_added
+		document.user_ids = list_union(document.user_ids, user_ids_added)
 
-	if len(user_emails_removed) > 0:
-		edit.user_emails_removed = user_emails_removed
-		document.user_emails = list_minus(document.user_emails, user_emails_removed)
+	if len(user_ids_removed) > 0:
+		edit.user_ids_removed = user_ids_removed
+		document.user_ids = list_minus(document.user_ids, user_ids_removed)
 	
 	if edit.version % document.edits_cache_modulo == 0:
 		edit.cached_document_name = document.name
 		edit.cached_document_tags = document.tags
-		edit.cached_document_user_emails = document.user_emails
+		edit.cached_document_user_ids = document.user_ids
 		edit.cached_document_content = body.content
 		
 	document.version = edit.version
@@ -508,21 +506,28 @@ class DocumentsHandler(webapp.RequestHandler):
 			document_dicts.append(document.to_index_dictionary())
 		write_json_response(self.response, document_dicts)
 	
+		# changes_since = jsonDocument.get('changes_since')
+		# Allow client to pass in changes since value. this way even if they have 1000 documents the size of
+		# the get response will be limited by changes instead of by number of documents. 
+		#
+		#
+
+	
 	@require_account
 	def post(self, account):
 		jsonDocument = simplejson.loads(self.request.body)
 		name = jsonDocument.get('name')
 		name = 'Untitled' if name == None or len(name) == 0 else re.split(r"(\r\n|\r|\n)", name, 1)[0]
 		tags = list_from_string(jsonDocument.get('tags'))
-		user_emails = list_from_string(jsonDocument.get('user_emails'))
+		user_ids = list_with_user_id(list_from_string(jsonDocument.get('user_ids')), user_id_for_user(account.user))
 		content = jsonDocument.get('content', '')			
 		content = re.sub(r"(\r\n|\r)", "\n", content) # Normalize line endings
 
 		def txn():
-			document = Document(parent=account, version=0, edits_size=len(name) + len(content), edits_cache_modulo=10, name=name, tags=tags, user_emails=user_emails)
+			document = Document(parent=account, version=0, edits_size=len(name) + len(content), edits_cache_modulo=10, name=name, tags=tags, user_ids=user_ids)
 			document.put()
-			edit = Edit(parent=document, account=account, version=0, new_name=name, tags_added=tags, user_emails_added=user_emails, cached_document_name=name, cached_document_content=content)
-			body = Body(parent=document, content=content)
+			edit = Edit(parent=document, account=account, version=0, new_name=name, tags_added=tags, user_ids_added=user_ids, cached_document_name=name, cached_document_content=content)
+			body = Body(parent=document, content=content, content_size=len(content))
 			account.documents_size += document.edits_size
 			db.put([edit, body, account])
 			return document
@@ -581,14 +586,14 @@ class DocumentHandler(webapp.RequestHandler):
 		name = jsonDocument.get('name')
 		name = 'Untitled' if name == None or len(name) == 0 else re.split(r"(\r\n|\r|\n)", name, 1)[0]
 		tags = list_from_string(jsonDocument.get('tags'))
-		user_emails = list_from_string(jsonDocument.get('user_emails'))
+		user_ids = list_from_string(jsonDocument.get('user_ids'))
 		content = jsonDocument.get('content', None)			
 
-		if name == None and user_emails == None and (version == None or content == None):
+		if name == None and user_ids == None and (version == None or content == None):
 			self.error(400)
 			return
 
-		version_name, version_tags, version_user_emails, version_content = get_document_version(self, document, version)
+		version_name, version_tags, version_user_ids, version_content = get_document_version(self, document, version)
 
 		if version_name == None:
 			return
@@ -606,15 +611,15 @@ class DocumentHandler(webapp.RequestHandler):
 			tags_added = list_minus(tags, version_tags)
 			tags_removed = list_minus(version_tags, tags)
 
-		user_emails_added = []
-		user_emails_removed = []
-		if len(user_emails) > 0:
-			user_emails_added = list_minus(user_emails, version_user_emails)
-			user_emails_removed = list_minus(version_user_emails, user_emails)
+		user_ids_added = []
+		user_ids_removed = []
+		if len(user_ids) > 0:
+			user_ids_added = list_minus(user_ids, version_user_ids)
+			user_ids_removed = list_minus(version_user_ids, user_ids)
 					
 		try:
-			document_account, document, body, edit, name = db.run_in_transaction(post_document_edit, self, user_account, document_account.key().id(), document.key().id(), version, name, tags_added, tags_removed, user_emails_added, user_emails_removed, patches)
-			#document.clearMemcache(user_emails_removed)
+			document_account, document, body, edit, name = db.run_in_transaction(post_document_edit, self, user_account, document_account.key().id(), document.key().id(), version, name, tags_added, tags_removed, user_ids_added, user_ids_removed, patches)
+			#document.clearMemcache(user_ids_removed)
 			document_edits = document.get_edits_in_json_read_form(version, document.version)
 			document_edits['content'] = body.content
 			
@@ -675,11 +680,11 @@ class DocumentEditsHandler(webapp.RequestHandler):
 		name = None if name == None or len(name) == 0 else re.split(r"(\r\n|\r|\n)", name, 1)[0]
 		tags_added = list_from_string(jsonDocument.get('tags_added', None))
 		tags_removed = list_from_string(jsonDocument.get('tags_removed', None))
-		user_emails_added = list_from_string(jsonDocument.get('user_emails_added', None))
-		user_emails_removed = list_from_string(jsonDocument.get('user_emails_removed', None))
+		user_ids_added = list_from_string(jsonDocument.get('user_ids_added', None))
+		user_ids_removed = list_from_string(jsonDocument.get('user_ids_removed', None))
 		patches = jsonDocument.get('patches', None)
 
-		if version == None or (name == None and len(tags_added) == 0 and len(tags_removed) == 0 and len(user_emails_added) == 0 and len(user_emails_removed) == 0 and patches == None):
+		if version == None or (name == None and len(tags_added) == 0 and len(tags_removed) == 0 and len(user_ids_added) == 0 and len(user_ids_removed) == 0 and patches == None):
 			self.error(400)
 			return
 
@@ -690,8 +695,8 @@ class DocumentEditsHandler(webapp.RequestHandler):
 			return
 			
 		try:
-			document_account, document, body, edit, name = db.run_in_transaction(post_document_edit, self, user_account, document_account_id, document_id, version, name, tags_added, tags_removed, user_emails_added, user_emails_removed, patches)			
-			#document.clearMemcache(user_emails_removed)
+			document_account, document, body, edit, name = db.run_in_transaction(post_document_edit, self, user_account, document_account_id, document_id, version, name, tags_added, tags_removed, user_ids_added, user_ids_removed, patches)			
+			#document.clearMemcache(user_ids_removed)
 			document_edits = document.get_edits_in_json_read_form(version + 1, document.version)
 			
 			if name:
@@ -707,11 +712,11 @@ class DocumentEditHandler(webapp.RequestHandler):
 	@require_document_edit
 	def get(self, user_account, document_account, document, edit):
 		if self.request.path.find("versions") > 0:
-			name, tags, user_emails, content = get_document_version(self, document, edit.version)
+			name, tags, user_ids, content = get_document_version(self, document, edit.version)
 			version = {}
 			version["name"] = name
 			version["tags"] = tags
-			version["user_emails"] = user_emails
+			version["user_ids"] = user_ids
 			version["content"] = content
 			version["created"] = str(edit.created)
 			write_json_response(self.response, version)
@@ -740,20 +745,52 @@ class DocumentEditHandler(webapp.RequestHandler):
 
 class DocumentsCronHandler(webapp.RequestHandler):
 	def get(self):
-		pass
-		#puts = []
-	 	#count = 0
-		
-		#for document in Document.gql('WHERE content != :1', None).fetch(500):
-		#	document.content = None
-		#	puts.append(document)
-		#	if count > 10:
-		#		count = 0
-		#		db.put(puts)
-		#		puts = []
-		
-		#db.put(puts)
+		if True:
+			return
+			
+		query = Body.gql('ORDER BY __key__')
 
+		# Use a query parameter to keep track of the last key of the last
+		# batch, to know where to start the next batch.
+		last_key_str = self.request.get('last')
+		if last_key_str:
+		  last_key = db.Key(last_key_str)
+		  query = Body.gql('WHERE __key__ > :1 ORDER BY __key__', last_key)
+
+		# For batches of 20, fetch 21, then use result #20 as the "last"
+		# if there is a 21st.
+		fetch_count = 100
+		bodys = query.fetch(fetch_count + 1)
+		new_last_key_str = None
+		if len(bodys) == (fetch_count + 1):
+			new_last_key_str = str(bodys[fetch_count - 1].key())
+
+		puts = []
+		for body in bodys:
+			if not body.content_size:
+				body.content_size = len(body.content)
+				puts.append(body)
+			#if document.content:
+			#	if not document.content.empty():
+			#		self.response.out.write(str(document.key()))
+					
+				#body = document.get_body()
+				#if not body:
+				#	body = Body(parent=document, content=document.content, content_size=len(document.content))
+				#	document.content = None
+				#	puts.append(document)
+				#	puts.append(body)
+				#	self.response.out.write(str(document.key()))
+				#else:
+				#	document.content = None
+				#	puts.append(document)					
+					#self.response.out.write(str(document.key()))
+			
+		db.put(puts)
+		
+		self.response.out.write("\n\n")
+		self.response.out.write(new_last_key_str)
+		
 		#for account in Account.all().fetch(1000):
 		#	user = account.user
 		#	account.user_id = user.user_id()
