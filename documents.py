@@ -11,6 +11,7 @@ from diff_match_patch import diff_match_patch
 from google.appengine.ext import db
 from google.appengine.api import users
 from google.appengine.ext import webapp
+from google.appengine.api import quota
 from google.appengine.api import memcache
 from google.appengine.ext.webapp import template
 
@@ -46,7 +47,8 @@ def list_with_user_id(l, user_id):
 class Account(db.Model):
 	user = db.UserProperty(required=True)
 	user_id = db.StringProperty()
-	documents_size = db.IntegerProperty(required=True)
+	documents_size = db.IntegerProperty(required=True, default=0)
+	documents_cpu = db.IntegerProperty(default=0)
 
 	@classmethod
 	def get_account_for_user(cls, user):
@@ -56,7 +58,7 @@ class Account(db.Model):
 				account = Account.gql("WHERE user = :1", user).get()
 							
 			if account == None:
-				account = Account(user=user, user_id=user_id_for_user(user), documents_size=0)
+				account = Account(user=user, user_id=user_id_for_user(user))
 				account.put()
 			else:
 				account.user = user
@@ -405,7 +407,9 @@ def get_document_version(handler, document, version):
 
 		return (base_name, base_tags, base_user_ids, base_content)
 
-def post_document_edit(handler, user_account, document_account_id, document_id, version, name, tags_added, tags_removed, user_ids_added, user_ids_removed, patches):
+def post_document_edit(handler, user_account, document_account_id, document_id, version, name, tags_added, tags_removed, user_ids_added, user_ids_removed, patches, used_quota):
+	start_quota = quota.get_request_cpu_usage()
+	
 	document, document_account = get_document_and_document_account(handler, user_account, document_account_id, document_id)
 	if document == None or document_account == None:
 		return None, None, None
@@ -415,7 +419,7 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 	edit = Edit(parent=document, account=user_account, version=document.version + 1)
 	puts = [document, edit, document_account]
 	conflicts = []
-	content = None
+	content = None	
 	
 	if (patches != None):
 		dmp.Match_Threshold = 1.0
@@ -470,10 +474,13 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 		edit.cached_document_tags = document.tags
 		edit.cached_document_user_ids = document.user_ids
 		edit.cached_document_content = body.content
+
+	end_quota = quota.get_request_cpu_usage()
 		
 	document.version = edit.version
 	document.edits_size += edit.size()
 	document_account.documents_size += edit.size()
+	document_account.documents_cpu += ((start_quota - end_quota) + used_quota)
 	
 	db.put(puts)
 	
@@ -506,19 +513,6 @@ class DocumentsHandler(webapp.RequestHandler):
 
 		self.response.headers['Content-Type'] = 'application/json'
 		self.response.out.write(cached_response)
-
-		#	document_dicts = []
-		#	for document in account.get_documents():
-		#		document_dicts.append(document.to_index_dictionary())
-		#	json = simplejson.dumps(document_dicts)
-		#	memcache.set(account.user.email(), json)
-	
-		# changes_since = jsonDocument.get('changes_since')
-		# Allow client to pass in changes since value. this way even if they have 1000 documents the size of
-		# the get response will be limited by changes instead of by number of documents. 
-		#
-		#
-
 	
 	@require_account
 	def post(self, account):
@@ -587,6 +581,8 @@ class DocumentHandler(webapp.RequestHandler):
 	
 	@require_document
 	def put(self, user_account, document_account, document):
+		start_quota = quota.get_request_cpu_usage()
+		
 		jsonDocument = simplejson.loads(self.request.body)
 		version = jsonDocument.get('version')
 		version = None if version == None else int(version)
@@ -623,9 +619,11 @@ class DocumentHandler(webapp.RequestHandler):
 		if len(user_ids) > 0:
 			user_ids_added = list_minus(user_ids, version_user_ids)
 			user_ids_removed = list_minus(version_user_ids, user_ids)
-					
+			
+		end_quota = quota.get_request_cpu_usage()
+				
 		try:
-			document_account, document, body, edit, name = db.run_in_transaction(post_document_edit, self, user_account, document_account.key().id(), document.key().id(), version, name, tags_added, tags_removed, user_ids_added, user_ids_removed, patches)
+			document_account, document, body, edit, name = db.run_in_transaction(post_document_edit, self, user_account, document_account.key().id(), document.key().id(), version, name, tags_added, tags_removed, user_ids_added, user_ids_removed, patches, end_quota - start_quota)
 			document.clearMemcache(user_ids_removed)
 			document_edits = document.get_edits_in_json_read_form(version, document.version)
 			document_edits['content'] = body.content
@@ -659,8 +657,6 @@ class DocumentHandler(webapp.RequestHandler):
 
 			document.deleted = True
 			db.put([document, document_account])
-			#document_account.documents_size -= document.edits_size
-			#document_account.put()
 			return document
 
 		try:
@@ -702,7 +698,7 @@ class DocumentEditsHandler(webapp.RequestHandler):
 			return
 			
 		try:
-			document_account, document, body, edit, name = db.run_in_transaction(post_document_edit, self, user_account, document_account_id, document_id, version, name, tags_added, tags_removed, user_ids_added, user_ids_removed, patches)			
+			document_account, document, body, edit, name = db.run_in_transaction(post_document_edit, self, user_account, document_account_id, document_id, version, name, tags_added, tags_removed, user_ids_added, user_ids_removed, patches, 0)			
 			document.clearMemcache(user_ids_removed)
 			document_edits = document.get_edits_in_json_read_form(version + 1, document.version)
 			
@@ -829,8 +825,6 @@ def real_main():
 	wsgiref.handlers.CGIHandler().run(application)
 
 def profile_main():
-	# This is the main function for profiling 
-	# We've renamed our original main() above to real_main()
 	import cProfile, pstats, StringIO
 	prof = cProfile.Profile()
 	prof = prof.runctx("real_main()", globals(), locals())
@@ -838,9 +832,6 @@ def profile_main():
 	stats = pstats.Stats(prof, stream=stream)
 	stats.sort_stats("time")  # Or cumulative
 	stats.print_stats(80)  # 80 = how many to print
-	# The rest is optional.
-	# stats.print_callees()
-	# stats.print_callers()
 	logging.info("Profile data:\n%s", stream.getvalue())
 
 if __name__ == '__main__':
