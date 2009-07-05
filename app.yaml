@@ -17,6 +17,9 @@ handlers:
   static_files: www/header.png
   upload: www/header.png
 
+- url: /admin
+  script: documents.py
+
 - url: /documents
   script: documents.py
 

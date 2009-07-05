@@ -494,13 +494,30 @@ class BaseHandler(webapp.RequestHandler):
 	def handle_exception(self, exception, debug_mode):
 		webapp.RequestHandler.handle_exception(self, exception, debug_mode)
 
+def render(file, template_values={}):
+	path = os.path.join(os.path.dirname(__file__) + '/templates', file)
+	if (os.path.exists(path)):
+		return template.render(path, template_values)
+	else:
+		return False
+
+class AdminHandler(BaseHandler):
+	@require_account
+	def get(self, account):
+		if account.user.email() == "jesse@hogbaysoftware.com":
+			self.response.out.write(render("Admin.html", { 'title' : "Admin", 'size_accounts' : Account.gql("ORDER BY documents_size DESC").fetch(100), 'cpu_accounts' : Account.gql("ORDER BY documents_cpu DESC").fetch(100) } ))		
+		else:
+			self.redirect(users.create_login_url("/admin"), False)
+
 class ClientHandler(BaseHandler):
 	def get(self):
 		if self.request.path.find("/documents/") == 0:
 			user = users.get_current_user()
 			if user:
-				path = os.path.join(os.path.dirname(__file__) + '/templates', "Documents.html")
-				self.response.out.write(template.render(path, { 'user_name' : user.email(), 'logout_url' : users.create_logout_url("/") }))
+				self.response.out.write(render("Documents.html", { 'user_name' : user.email(), 'logout_url' : users.create_logout_url("/") } ))		
+				
+				#path = os.path.join(os.path.dirname(__file__) + '/templates', "Documents.html")
+				#self.response.out.write(template.render(path, { 'user_name' : user.email(), 'logout_url' : users.create_logout_url("/") }))
 			else:
 				self.redirect(users.create_login_url("/documents/"), False)
 		else:
@@ -822,6 +839,7 @@ class DocumentsCronHandler(BaseHandler):
 
 def real_main():
 	application = webapp.WSGIApplication([
+		('/admin/?', AdminHandler),
 		('/documents', ClientHandler),
 		('/documents/', ClientHandler),
 		('/v1/documents/?', DocumentsHandler),
