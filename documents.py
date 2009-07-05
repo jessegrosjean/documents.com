@@ -38,9 +38,7 @@ def user_id_for_user(user):
 	return user_id
 
 def list_with_user_id(l, user_id):
-	try:
-		l.index(user_id)
-	except ValueError:
+	if not user_id in l:
 		l.append(user_id)
 	return l
 
@@ -71,7 +69,6 @@ class Account(db.Model):
 		return self.user == other.user if isinstance(other, Account) else False
 		
 	def get_documents(self):
-		#return Document.gql("WHERE ANCESTOR IS :1 AND deleted = :2 ORDER BY name", self, False)
 		return Document.gql("WHERE user_ids = :1 AND deleted = :2 ORDER BY name", self.user_id, False)
 
 	def get_edits_with_unresolved_conflicts(self):
@@ -113,8 +110,8 @@ class Document(db.Model):
 			self.body = Body.gql("WHERE ANCESTOR IS :1", self).get()
 		return self.body
 		
-	def get_edits(self, start, end, sequence="ASC"):
-		return Edit.gql('WHERE ANCESTOR IS :document AND version >= :start AND version <= :end ORDER BY version %s' % sequence, document=self, start=start, end=end).fetch((end - start) + 1)
+	def get_edits(self, start, end):
+		return Edit.gql('WHERE ANCESTOR IS :document AND version >= :start AND version <= :end ORDER BY version ASC', document=self, start=start, end=end).fetch((end - start) + 1)
 
 	def get_edits_in_json_read_form(self, start, end):
 		edits = {}
@@ -345,7 +342,7 @@ def get_document_and_document_account(handler, user_account, document_account_id
 	if document == None or document.deleted or document_account == None:
 		handler.error(404)
 		return None, None
-	elif not (document.parent() == user_account or user_account.user.user_ids() in document.user_ids):
+	elif not (document.parent() == user_account or user_account.user.user_id() in document.user_ids):
 		handler.error(401)
 		return None, None
 
@@ -364,45 +361,44 @@ def get_document_version(handler, document, version):
 		edit = Edit.gql('WHERE ANCESTOR IS :document AND version = :version', document=document, version=version).get()
 		return (edit.cached_document_name, edit.cached_document_tags, edit.cached_document_user_ids, edit.cached_document_content)
 	else:
-		# XXX rewrite these queries so that version is ordered the same in both. That will save the building of one index.
-		if modulo > (document.edits_cache_modulo / 2):
-			base_version = (version - modulo) + document.edits_cache_modulo
-			edits_query = 'WHERE ANCESTOR IS :document AND version > :version AND version <= :base_version ORDER BY version DESC'
-			calculate_forward = False
-		else:
-			base_version = (version - modulo)
-			edits_query = 'WHERE ANCESTOR IS :document AND version >= :base_version AND version <= :version ORDER BY version'
-			calculate_forward = True
-
 		base_name = None
 		base_tags = None
 		base_user_ids = None
 		base_content = None
 		dmp = diff_match_patch()
 		dmp.Match_Threshold = 0.0
-
-		for edit in Edit.gql(edits_query, document=document, version=version, base_version=base_version).fetch(document.edits_cache_modulo):
-			if calculate_forward:
-				if base_name == None:
-					base_name = edit.cached_document_name
-					base_tags = edit.cached_document_tags[:]
-					base_user_ids = edit.cached_document_user_ids[:]
-					base_content = edit.cached_document_content
-				else:
-					base_name, base_tags, base_user_ids, base_content = edit.apply(base_name, base_tags, base_user_ids, base_content, dmp)
+		
+		if modulo > (document.edits_cache_modulo / 2):
+			end_version = (version - modulo) + document.edits_cache_modulo
+			edits = document.get_edits(version + 1, end_version)
+			edits.reverse()
+			first_edit = edits[0]
+			if first_edit.version % document.edits_cache_modulo == 0:
+				base_name = first_edit.cached_document_name
+				base_tags = first_edit.cached_document_tags[:]
+				base_user_ids = first_edit.cached_document_user_ids[:]
+				base_content = first_edit.cached_document_content
 			else:
-				if base_name == None:
-					if edit.version % document.edits_cache_modulo == 0:
-						base_name = edit.cached_document_name
-						base_tags = edit.cached_document_tags[:]
-						base_user_ids = edit.cached_document_user_ids[:]
-						base_content = edit.cached_document_content
-					else:
-						base_name = document.name
-						base_tags = document.tags[:]
-						base_user_ids = document.user_ids[:]
-						base_content = document.get_body().content
+				base_name = document.name
+				base_tags = document.tags[:]
+				base_user_ids = document.user_ids[:]
+				base_content = document.get_body().content
+			calculate_forward = False
+		else:
+			start_version = (version - modulo)
+			edits = document.get_edits(start_version, version)
+			first_edit = edits[0]
+			base_name = first_edit.cached_document_name
+			base_tags = first_edit.cached_document_tags[:]
+			base_user_ids = first_edit.cached_document_user_ids[:]
+			base_content = first_edit.cached_document_content
+			edits = edits[1:]
+			calculate_forward = True
 
+		for edit in edits:
+			if calculate_forward:
+				base_name, base_tags, base_user_ids, base_content = edit.apply(base_name, base_tags, base_user_ids, base_content, dmp)
+			else:
 				base_name, base_tags, base_user_ids, base_content = edit.reverse(base_name, base_tags, base_user_ids, base_content, dmp)
 
 		return (base_name, base_tags, base_user_ids, base_content)
@@ -420,6 +416,10 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 	puts = [document, edit, document_account]
 	conflicts = []
 	content = None	
+
+	document_user_id = document_account.user.user_id()
+	if document_user_id in user_ids_removed:
+		user_ids_removed.remove(document_user_id)
 	
 	if (patches != None):
 		dmp.Match_Threshold = 1.0
@@ -480,13 +480,21 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 	document.version = edit.version
 	document.edits_size += edit.size()
 	document_account.documents_size += edit.size()
-	document_account.documents_cpu += ((start_quota - end_quota) + used_quota)
+	document_account.documents_cpu += ((end_quota - start_quota) + used_quota)
 	
 	db.put(puts)
 	
 	return document_account, document, body, edit, name
 
-class ClientHandler(webapp.RequestHandler):
+class BaseHandler(webapp.RequestHandler):
+	def head(self, *args):
+		self.get(*args)
+		self.response.clear()
+
+	def handle_exception(self, exception, debug_mode):
+		webapp.RequestHandler.handle_exception(self, exception, debug_mode)
+
+class ClientHandler(BaseHandler):
 	def get(self):
 		if self.request.path.find("/documents/") == 0:
 			user = users.get_current_user()
@@ -498,10 +506,10 @@ class ClientHandler(webapp.RequestHandler):
 		else:
 			self.redirect("/documents/", True)
 		
-class DocumentsHandler(webapp.RequestHandler):
+class DocumentsHandler(BaseHandler):
 	@require_account
 	def get(self, account):
-		cache_key = account.user.user_id()
+		cache_key = user_id_for_user(account.user)
 		cached_response = memcache.get(cache_key)
 
 		if cached_response is None:
@@ -521,8 +529,8 @@ class DocumentsHandler(webapp.RequestHandler):
 		name = 'Untitled' if name == None or len(name) == 0 else re.split(r"(\r\n|\r|\n)", name, 1)[0]
 		tags = list_from_string(jsonDocument.get('tags'))
 		user_ids = list_with_user_id(list_from_string(jsonDocument.get('user_ids')), user_id_for_user(account.user))
-		content = jsonDocument.get('content', '')			
-		content = re.sub(r"(\r\n|\r)", "\n", content) # Normalize line endings
+		content = jsonDocument.get('content', '')
+		content = re.sub(r"(\r\n|\r)", "\n", content)
 
 		def txn():
 			document = Document(parent=account, version=0, edits_size=len(name) + len(content), edits_cache_modulo=10, name=name, tags=tags, user_ids=user_ids)
@@ -544,7 +552,7 @@ class DocumentsHandler(webapp.RequestHandler):
 		self.response.headers.add_header("Location", document.uri())
 		write_json_response(self.response, document.to_document_dictionary())
 
-class DocumentsBatchHandler(webapp.RequestHandler):
+class DocumentsBatchHandler(BaseHandler):
 	@require_account
 	def post(self):
 		pass
@@ -556,7 +564,7 @@ class DocumentsBatchHandler(webapp.RequestHandler):
 		#	url = request["url"]
 		#	body = request["body"]
 	
-class ConflictsHandler(webapp.RequestHandler):
+class ConflictsHandler(BaseHandler):
 	@require_account
 	def get(self, account):
 		conflict_dicts = []
@@ -565,7 +573,7 @@ class ConflictsHandler(webapp.RequestHandler):
 				conflict_dicts.append(edit.to_conflict_dictionary())
 		write_json_response(self.response, conflict_dicts)
 		
-class DocumentHandler(webapp.RequestHandler):
+class DocumentHandler(BaseHandler):
 	@require_document
 	def get(self, user_account, document_account, document):
 		write_json_response(self.response, document.to_document_dictionary())
@@ -602,7 +610,7 @@ class DocumentHandler(webapp.RequestHandler):
 			return
 		
 		if content != None:
-			content = re.sub(r"(\r\n|\r)", "\n", content) # Normalize line endings
+			content = re.sub(r"(\r\n|\r)", "\n", content)
 			dmp = diff_match_patch()
 			patches = dmp.patch_toText(dmp.patch_make(version_content, content))
 		else:
@@ -667,7 +675,7 @@ class DocumentHandler(webapp.RequestHandler):
 		except db.TransactionFailedError:
 			self.error(503)
 
-class DocumentEditsHandler(webapp.RequestHandler):
+class DocumentEditsHandler(BaseHandler):
 	@require_document_edits_paging
 	def get(self, user_account, document_account, document, edits_start, edits_end, edits_next, edits_previous):
 		start = self.request.get('start', 0)
@@ -711,7 +719,7 @@ class DocumentEditsHandler(webapp.RequestHandler):
 		except db.TransactionFailedError:
 			self.error(503)
 
-class DocumentEditHandler(webapp.RequestHandler):
+class DocumentEditHandler(BaseHandler):
 	@require_document_edit
 	def get(self, user_account, document_account, document, edit):
 		if self.request.path.find("versions") > 0:
@@ -746,9 +754,9 @@ class DocumentEditHandler(webapp.RequestHandler):
 			
 		edit.put()
 
-class DocumentsCronHandler(webapp.RequestHandler):
+class DocumentsCronHandler(BaseHandler):
 	def get(self):
-		if True:
+		if True:			
 			return
 			
 		query = Body.gql('ORDER BY __key__')
@@ -798,8 +806,11 @@ class DocumentsCronHandler(webapp.RequestHandler):
 		#	user = account.user
 		#	account.user_id = user.user_id()
 		#	account.put()
-		#for document in Document.all().fetch(1000):
-		#	document.name_version = 0
+		to_delete = []
+		for document in Document.all().fetch(1000):
+			if document.deleted:
+				pass
+			document.name_version = 0
 		#	document.put()
 		#to_delete = []
 		#for deleted in Deleted.all().fetch(10):
