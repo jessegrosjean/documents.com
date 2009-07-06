@@ -1,0 +1,19 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+	<head>
+		<title>Admin</title>
+	</head>
+
+	<body>
+		<h1>Size Accounts</h1>
+		{% for account in size_accounts %}
+			<p>{{ account.user.nickname }} ( {{ account.documents_size }} )</p>
+	    {% endfor %}
+
+		<h1>CPU Accounts</h1>
+		{% for account in cpu_accounts %}
+			<p>{{ account.user.nickname }} ( {{ account.documents_cpu }} )</p>
+	    {% endfor %}
+	</body>
+
+</html>

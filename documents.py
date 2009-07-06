@@ -775,6 +775,24 @@ class DocumentsCronHandler(BaseHandler):
 	def get(self):
 		if True:			
 			return
+		
+		def delete_document_txn(document):
+			to_delete = []
+			
+			edits = db.GqlQuery("SELECT __key__ FROM Edit WHERE ANCESTOR IS :document", document=document).fetch(10)
+			to_delete.extend(edits)
+			if (len(edits) < 10):
+				account = document.parent()
+				account.documents_size -= document.edits_size
+				to_delete.append(document)
+				body = document.get_body()
+				if body:
+					to_delete.append(body)
+				db.put(account)
+			db.delete(to_delete)
+		
+		for each in Document.gql('WHERE deleted = True').fetch(10):
+			db.run_in_transaction(delete_document_txn, each)
 			
 		query = Body.gql('ORDER BY __key__')
 
@@ -823,11 +841,11 @@ class DocumentsCronHandler(BaseHandler):
 		#	user = account.user
 		#	account.user_id = user.user_id()
 		#	account.put()
-		to_delete = []
-		for document in Document.all().fetch(1000):
-			if document.deleted:
-				pass
-			document.name_version = 0
+		#to_delete = []
+		#for document in Document.all().fetch(1000):
+		#	if document.deleted:
+		#		pass
+		#	document.name_version = 0
 		#	document.put()
 		#to_delete = []
 		#for deleted in Deleted.all().fetch(10):
