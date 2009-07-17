@@ -32,10 +32,10 @@ def list_from_string(string):
 		return []
 
 def user_id_for_user(user):
-	user_id = user.user_id()
-	if not user_id:
+	if is_development_server():
 		return user.email()
-	return user_id
+	else:
+		return user.user_id() # inconsistent on dev server
 
 def list_with_user_id(l, user_id):
 	if not user_id in l:
@@ -83,7 +83,7 @@ class Document(db.Model):
 	created = db.DateTimeProperty(required=True, auto_now_add=True)
 	modified = db.DateTimeProperty(required=True, auto_now=True)
 	tags = db.StringListProperty()
-	user_ids = db.StringListProperty()
+	user_ids = db.StringListProperty(required=True)
 	deleted = db.BooleanProperty(required=True, default=False)
 	body = None
 	
@@ -229,10 +229,18 @@ class Edit(db.Model):
 		if self.patches: content = dmp.patch_apply(dmp.patch_reverse(dmp.patch_fromText(self.patches.encode('ascii'))), content)[0]
 		return (name, tags, user_ids, content)
 
+#class Change(db.Model):
+#	effected_users = db.StringListProperty()
+#	document = db.StringProperty(required=True)
+#	change = db.StringProperty(required=True, choices=['a', 'r', 'd'])
+
 #
 # Controllers
 #
 
+def application_id():
+	return os.environ['APPLICATION_ID']
+	
 def is_development_server():
 	return os.environ['SERVER_SOFTWARE'].startswith('Dev')
 	
@@ -515,9 +523,6 @@ class ClientHandler(BaseHandler):
 			user = users.get_current_user()
 			if user:
 				self.response.out.write(render("Documents.html", { 'user_name' : user.email(), 'logout_url' : users.create_logout_url("/") } ))		
-				
-				#path = os.path.join(os.path.dirname(__file__) + '/templates', "Documents.html")
-				#self.response.out.write(template.render(path, { 'user_name' : user.email(), 'logout_url' : users.create_logout_url("/") }))
 			else:
 				self.redirect(users.create_login_url("/documents/"), False)
 		else:
