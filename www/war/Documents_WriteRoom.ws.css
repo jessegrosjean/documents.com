@@ -1,0 +1,29 @@
+body { margin:0; padding:0; color:green; background:black; font:1em 'Lucida Grande', Geneva, Arial, Verdana, sans-serif; }
+a { color:green; }
+textarea { outline:none; resize:none; }
+textarea:focus { outline:none; }
+h1, h2 { margin:0; padding:0 }
+hr { border:none; height:1px; background-color:green; }
+
+#loading { margin:0.5em; }
+
+.menu { width:100%; padding:0.25em; font-weight:bold; border-bottom:1px solid green; }
+.menuItem { margin:0 0.5em; white-space:nowrap; font-weight:bold; text-decoration:none; color:green; cursor:hand; cursor:pointer; }
+.menuItem:hover { text-decoration:underline; }
+
+.disabled { color:#003f00; cursor:default; }
+.disabled:hover { text-decoration:none; }
+
+.title-bar { border-bottom:1px solid green; text-align:center; width:100%; padding:0.25em; background-image: url('title-bar_WriteRoom.ws.png'); background-repeat: repeat-x; background-position:50%; }
+.title { font-weight:bold; background:black; padding:0 1em; }
+
+.content-container { width:100%; height:100%; padding:0.5em; }
+.content { border:none; color:green; background:black; font:1.0em Helvetica; width:100%; height:100%; }
+.scrolled-content { padding-right:0.5em; }
+
+.revisionLinks a { margin:0 0.5em 0 0; }
+.revision .content { margin-top:0.5em; padding-top:0.5em; border-top:1px solid green; }
+
+ul { margin:0.5em; }
+.conflict-view { margin-bottom:1em; padding:0.5em; border:1px solid green; }
+.conflict-diffs { margin-top:1em; }

@@ -8,6 +8,7 @@ import wsgiref.handlers
 from django.utils import simplejson
 from diff_match_patch import diff_match_patch
 
+from google.appengine import runtime
 from google.appengine.ext import db
 from google.appengine.api import users
 from google.appengine.ext import webapp
@@ -238,8 +239,11 @@ class Edit(db.Model):
 # Controllers
 #
 
-def application_id():
-	return os.environ['APPLICATION_ID']
+def service_name():
+	if os.environ['APPLICATION_ID'].endswith('writeroom'):
+		return 'WriteRoom.ws'
+	else:
+		return 'TaskPaper.ws'
 	
 def is_development_server():
 	return os.environ['SERVER_SOFTWARE'].startswith('Dev')
@@ -250,6 +254,11 @@ def stop_processing(*a, **kw):
 def write_json_response(response, json):
 	response.headers['Content-Type'] = 'application/json'
 	response.out.write(simplejson.dumps(json))
+
+def write_deadline_exceeded_response(response, document):
+	response.response.clear()
+	response.response.set_status(500)
+	response.response.out.write("Document %s sync could not be completed in time. If this problem persists the document may be to big. Please delete the document and divide it into two smaller documents." % document)
 	
 def require_account(f):	
 	def g(*a, **kw):
@@ -522,7 +531,7 @@ class ClientHandler(BaseHandler):
 		if self.request.path.find("/documents/") == 0:
 			user = users.get_current_user()
 			if user:
-				self.response.out.write(render("Documents.html", { 'user_name' : user.email(), 'logout_url' : users.create_logout_url("/") } ))		
+				self.response.out.write(render("Documents.html", { 'service_name' : service_name(), 'user_name' : user.email(), 'logout_url' : users.create_logout_url("/") } ))		
 			else:
 				self.redirect(users.create_login_url("/documents/"), False)
 		else:
@@ -546,28 +555,31 @@ class DocumentsHandler(BaseHandler):
 	
 	@require_account
 	def post(self, account):
-		jsonDocument = simplejson.loads(self.request.body)
-		name = jsonDocument.get('name')
-		name = 'Untitled' if name == None or len(name) == 0 else re.split(r"(\r\n|\r|\n)", name, 1)[0]
-		tags = list_from_string(jsonDocument.get('tags'))
-		user_ids = list_with_user_id(list_from_string(jsonDocument.get('user_ids')), user_id_for_user(account.user))
-		content = jsonDocument.get('content', '')
-		content = re.sub(r"(\r\n|\r)", "\n", content)
-
-		def txn():
-			document = Document(parent=account, version=0, edits_size=len(name) + len(content), edits_cache_modulo=10, name=name, tags=tags, user_ids=user_ids)
-			document.put()
-			edit = Edit(parent=document, account=account, version=0, new_name=name, tags_added=tags, user_ids_added=user_ids, cached_document_name=name, cached_document_content=content)
-			body = Body(parent=document, content=content, content_size=len(content))
-			account.documents_size += document.edits_size
-			db.put([edit, body, account])
-			return document
-		
 		try:
+			jsonDocument = simplejson.loads(self.request.body)
+			name = jsonDocument.get('name')
+			name = 'Untitled' if name == None or len(name) == 0 else re.split(r"(\r\n|\r|\n)", name, 1)[0]
+			tags = list_from_string(jsonDocument.get('tags'))
+			user_ids = list_with_user_id(list_from_string(jsonDocument.get('user_ids')), user_id_for_user(account.user))
+			content = jsonDocument.get('content', '')
+			content = re.sub(r"(\r\n|\r)", "\n", content)
+
+			def txn():
+				document = Document(parent=account, version=0, edits_size=len(name) + len(content), edits_cache_modulo=10, name=name, tags=tags, user_ids=user_ids)
+				document.put()
+				edit = Edit(parent=document, account=account, version=0, new_name=name, tags_added=tags, user_ids_added=user_ids, cached_document_name=name, cached_document_content=content)
+				body = Body(parent=document, content=content, content_size=len(content))
+				account.documents_size += document.edits_size
+				db.put([edit, body, account])
+				return document
+		
 			document = db.run_in_transaction(txn)
 			document.clearMemcache()
 		except db.TransactionFailedError:
 			self.error(503)
+			return
+		except runtime.DeadlineExceededError:
+			self.write_deadline_exceeded_response(self.response, name)
 			return
 		
 		self.response.set_status(201)
@@ -611,48 +623,48 @@ class DocumentHandler(BaseHandler):
 	
 	@require_document
 	def put(self, user_account, document_account, document):
-		start_quota = quota.get_request_cpu_usage()
-		
-		jsonDocument = simplejson.loads(self.request.body)
-		version = jsonDocument.get('version')
-		version = None if version == None else int(version)
-		name = jsonDocument.get('name')
-		name = 'Untitled' if name == None or len(name) == 0 else re.split(r"(\r\n|\r|\n)", name, 1)[0]
-		tags = list_from_string(jsonDocument.get('tags'))
-		user_ids = list_from_string(jsonDocument.get('user_ids'))
-		content = jsonDocument.get('content', None)			
-
-		if name == None and user_ids == None and (version == None or content == None):
-			self.error(400)
-			return
-
-		version_name, version_tags, version_user_ids, version_content = get_document_version(self, document, version)
-
-		if version_name == None:
-			return
-		
-		if content != None:
-			content = re.sub(r"(\r\n|\r)", "\n", content)
-			dmp = diff_match_patch()
-			patches = dmp.patch_toText(dmp.patch_make(version_content, content))
-		else:
-			patches = None
-			
-		tags_added = []
-		tags_removed = []
-		if len(tags) > 0:
-			tags_added = list_minus(tags, version_tags)
-			tags_removed = list_minus(version_tags, tags)
-
-		user_ids_added = []
-		user_ids_removed = []
-		if len(user_ids) > 0:
-			user_ids_added = list_minus(user_ids, version_user_ids)
-			user_ids_removed = list_minus(version_user_ids, user_ids)
-			
-		end_quota = quota.get_request_cpu_usage()
-				
 		try:
+			start_quota = quota.get_request_cpu_usage()
+		
+			jsonDocument = simplejson.loads(self.request.body)
+			version = jsonDocument.get('version')
+			version = None if version == None else int(version)
+			name = jsonDocument.get('name')
+			name = 'Untitled' if name == None or len(name) == 0 else re.split(r"(\r\n|\r|\n)", name, 1)[0]
+			tags = list_from_string(jsonDocument.get('tags'))
+			user_ids = list_from_string(jsonDocument.get('user_ids'))
+			content = jsonDocument.get('content', None)			
+
+			if name == None and user_ids == None and (version == None or content == None):
+				self.error(400)
+				return
+
+			version_name, version_tags, version_user_ids, version_content = get_document_version(self, document, version)
+
+			if version_name == None:
+				return
+		
+			if content != None:
+				content = re.sub(r"(\r\n|\r)", "\n", content)
+				dmp = diff_match_patch()
+				patches = dmp.patch_toText(dmp.patch_make(version_content, content))
+			else:
+				patches = None
+			
+			tags_added = []
+			tags_removed = []
+			if len(tags) > 0:
+				tags_added = list_minus(tags, version_tags)
+				tags_removed = list_minus(version_tags, tags)
+
+			user_ids_added = []
+			user_ids_removed = []
+			if len(user_ids) > 0:
+				user_ids_added = list_minus(user_ids, version_user_ids)
+				user_ids_removed = list_minus(version_user_ids, user_ids)
+			
+			end_quota = quota.get_request_cpu_usage()
+				
 			document_account, document, body, edit, name = db.run_in_transaction(post_document_edit, self, user_account, document_account.key().id(), document.key().id(), version, name, tags_added, tags_removed, user_ids_added, user_ids_removed, patches, end_quota - start_quota)
 			document.clearMemcache(user_ids_removed)
 			document_edits = document.get_edits_in_json_read_form(version, document.version)
@@ -667,7 +679,9 @@ class DocumentHandler(BaseHandler):
 			write_json_response(self.response, document_edits)
 		except db.TransactionFailedError:
 			self.error(503)
-						
+		except runtime.DeadlineExceededError:
+			self.write_deadline_exceeded_response(self.response, document.name)
+			
 	@require_account
 	def delete(self, user_account, document_account_id, document_id):
 		version = self.request.get('version', None)
@@ -707,27 +721,27 @@ class DocumentEditsHandler(BaseHandler):
 
 	@require_account
 	def post(self, user_account, document_account_id, document_id):
-		jsonDocument = simplejson.loads(self.request.body)
-		version = jsonDocument.get('version', None)
-		name = jsonDocument.get('name', None)
-		name = None if name == None or len(name) == 0 else re.split(r"(\r\n|\r|\n)", name, 1)[0]
-		tags_added = list_from_string(jsonDocument.get('tags_added', None))
-		tags_removed = list_from_string(jsonDocument.get('tags_removed', None))
-		user_ids_added = list_from_string(jsonDocument.get('user_ids_added', None))
-		user_ids_removed = list_from_string(jsonDocument.get('user_ids_removed', None))
-		patches = jsonDocument.get('patches', None)
-
-		if version == None or (name == None and len(tags_added) == 0 and len(tags_removed) == 0 and len(user_ids_added) == 0 and len(user_ids_removed) == 0 and patches == None):
-			self.error(400)
-			return
-
 		try:
-			version = int(version)
-		except:
-			self.error(400)
-			return
+			jsonDocument = simplejson.loads(self.request.body)
+			version = jsonDocument.get('version', None)
+			name = jsonDocument.get('name', None)
+			name = None if name == None or len(name) == 0 else re.split(r"(\r\n|\r|\n)", name, 1)[0]
+			tags_added = list_from_string(jsonDocument.get('tags_added', None))
+			tags_removed = list_from_string(jsonDocument.get('tags_removed', None))
+			user_ids_added = list_from_string(jsonDocument.get('user_ids_added', None))
+			user_ids_removed = list_from_string(jsonDocument.get('user_ids_removed', None))
+			patches = jsonDocument.get('patches', None)
+
+			if version == None or (name == None and len(tags_added) == 0 and len(tags_removed) == 0 and len(user_ids_added) == 0 and len(user_ids_removed) == 0 and patches == None):
+				self.error(400)
+				return
+
+			try:
+				version = int(version)
+			except:
+				self.error(400)
+				return
 			
-		try:
 			document_account, document, body, edit, name = db.run_in_transaction(post_document_edit, self, user_account, document_account_id, document_id, version, name, tags_added, tags_removed, user_ids_added, user_ids_removed, patches, 0)			
 			document.clearMemcache(user_ids_removed)
 			document_edits = document.get_edits_in_json_read_form(version + 1, document.version)
@@ -740,6 +754,8 @@ class DocumentEditsHandler(BaseHandler):
 			write_json_response(self.response, document_edits)
 		except db.TransactionFailedError:
 			self.error(503)
+		except runtime.DeadlineExceededError:
+			self.write_deadline_exceeded_response(self.response, document_id)
 
 class DocumentEditHandler(BaseHandler):
 	@require_document_edit
