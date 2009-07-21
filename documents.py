@@ -531,7 +531,8 @@ class ClientHandler(BaseHandler):
 		if self.request.path.find("/documents/") == 0:
 			user = users.get_current_user()
 			if user:
-				self.response.out.write(render("Documents.html", { 'service_name' : service_name(), 'user_name' : user.email(), 'logout_url' : users.create_logout_url("/") } ))		
+				service = service_name()
+				self.response.out.write(render("Documents.%s.html" % service, { 'service_name' : service, 'user_name' : user.email(), 'logout_url' : users.create_logout_url("/") } ))		
 			else:
 				self.redirect(users.create_login_url("/documents/"), False)
 		else:
@@ -891,6 +892,9 @@ def real_main():
 		], debug=True)
 		
 	wsgiref.handlers.CGIHandler().run(application)
+
+see this page. do i need to inclue main function?
+http://code.google.com/appengine/docs/python/runtime.html#App_Caching
 
 def profile_main():
 	import cProfile, pstats, StringIO

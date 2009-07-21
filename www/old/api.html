@@ -8,20 +8,25 @@
 	<body>
 		<pre>
 		GET /v1/documents
-			Gets JSON of document ids, names, and versions
+			Gets JSON list of existing document ids, names, and versions
 
 		POST /v1/documents
-			Create new document with name and content parameters (application/x-www-form-urlencoded)
+			Create new document with "name" and "content" parameters json encoded in post body. Response body includes recorded name, content and documents assigned ID.
 
 		GET /v1/documents/document_id
-			Gets JSON representation of full document.
+			Gets JSON representation of full document. Attributes include "name", "content", and "version"
 
 		PUT /v1/documents/document_id
+			Include at least one of "name" or "content", also must include "version". Encode these as json key value table in PUT body.
+			The version should be the clients version of the document. PUT is implemented as follows on the server:
+				- server does a diff between PUT content and the document content for "version" that is stored on server.
+				- server then applies that diff to 
+							
 			Update document name and content. Must also pass in version of the document that is getting updated
 			to deal with conflicts. (application/x-www-form-urlencoded)
 
 		DELETE /v1/documents/document_id?version=version
-			Delete document and all associated edits. Version query parameter is required and must match the documents current
+			Delete document. Version query parameter is required and must match the documents current
 			version for the delete to be successful.
 
 		GET /v1/documents/document_id/edits?start=0&end=2
