@@ -17,6 +17,73 @@ from google.appengine.api import memcache
 from google.appengine.ext.webapp import template
 
 #
+# Queries
+#
+
+account_by_user_id_query = None
+def get_account_by_user_id_query(user_id):
+	global account_by_user_id_query
+	if account_by_user_id_query:
+		account_by_user_id_query.bind(user_id)	
+	else:
+		account_by_user_id_query = Account.gql("WHERE user_id = :1", user_id)
+	return account_by_user_id_query
+
+account_by_user_query = None
+def get_account_by_user_query(user):
+	global account_by_user_query
+	if account_by_user_query:
+		account_by_user_query.bind(user)	
+	else:
+		account_by_user_query = Account.gql("WHERE user = :1", user)
+	return account_by_user_query
+
+documents_query = None
+def get_documents_query(user_id):
+	global documents_query
+	if documents_query:
+		documents_query.bind(user_id, False)
+	else:
+		documents_query = Document.gql("WHERE user_ids = :1 AND deleted = :2 ORDER BY name", user_id, False)
+	return documents_query
+
+edits_with_unresolved_conflicts_query = None
+def get_edits_with_unresolved_conflicts_query(account):
+	global edits_with_unresolved_conflicts_query
+	if edits_with_unresolved_conflicts_query:
+		edits_with_unresolved_conflicts_query.bind(account, False)
+	else:
+		edits_with_unresolved_conflicts_query = Edit.gql("WHERE account = :1 AND conflicts_resolved = :2 ORDER BY created DESC", account, False)
+	return edits_with_unresolved_conflicts_query
+
+body_query = None
+def get_body_query(document):
+	global body_query
+	if body_query:
+		body_query.bind(document)	
+	else:
+		body_query = Body.gql("WHERE ANCESTOR IS :1", document)
+	return body_query
+
+edits_query = None
+def get_edits_query(document, start, end):
+	global edits_query
+	if edits_query:
+		edits_query.bind(document=document, start=start, end=end)
+	else:
+		edits_query = Edit.gql('WHERE ANCESTOR IS :document AND version >= :start AND version <= :end ORDER BY version ASC', document=document, start=start, end=end)
+	return edits_query
+
+edit_query = None
+def get_edit_query(document, version):
+	global edit_query
+	if edit_query:
+		edit_query.bind(document=document, version=version)
+	else:
+		edit_query = Edit.gql('WHERE ANCESTOR IS :document AND version = :version', document=document, version=version)
+	return edit_query
+
+#
 # Models
 #
 
@@ -52,10 +119,11 @@ class Account(db.Model):
 	@classmethod
 	def get_account_for_user(cls, user):
 		if user:
-			account = Account.gql("WHERE user_id = :1", user_id_for_user(user)).get()			
+			account = get_account_by_user_id_query(user_id_for_user(user)).get()
+
 			if account == None:
-				account = Account.gql("WHERE user = :1", user).get()
-							
+				account = get_account_by_user_query(user).get()
+				
 			if account == None:
 				account = Account(user=user, user_id=user_id_for_user(user))
 				account.put()
@@ -70,10 +138,10 @@ class Account(db.Model):
 		return self.user == other.user if isinstance(other, Account) else False
 		
 	def get_documents(self):
-		return Document.gql("WHERE user_ids = :1 AND deleted = :2 ORDER BY name", self.user_id, False)
+		return get_documents_query(self.user_id)
 
 	def get_edits_with_unresolved_conflicts(self):
-		return Edit.gql("WHERE account = :1 AND conflicts_resolved = :2 ORDER BY created DESC", self, False)
+		return get_edits_with_unresolved_conflicts_query(self)
 
 class Document(db.Model):
 	version = db.IntegerProperty(required=True)
@@ -108,11 +176,11 @@ class Document(db.Model):
 
 	def get_body(self):
 		if not self.body:
-			self.body = Body.gql("WHERE ANCESTOR IS :1", self).get()
+			self.body = get_body_query(self).get()
 		return self.body
 		
 	def get_edits(self, start, end):
-		return Edit.gql('WHERE ANCESTOR IS :document AND version >= :start AND version <= :end ORDER BY version ASC', document=self, start=start, end=end).fetch((end - start) + 1)
+		return get_edits_query(self, start, end).fetch((end - start) + 1)
 
 	def get_edits_in_json_read_form(self, start, end):
 		edits = {}
@@ -337,7 +405,7 @@ def require_document_edit(f):
 		document_account = a[2]
 		document = a[3]
 		edit_version = a[4]
-		edit = Edit.gql('WHERE ANCESTOR IS :document AND version = :version', document=document, version=int(edit_version)).get()
+		edit = get_edit_query(document, int(edit_version)).get()
 
 		if edit == None:
 			handler.error(404)
@@ -375,7 +443,7 @@ def get_document_version(handler, document, version):
 	modulo = (version % document.edits_cache_modulo)
 
 	if modulo == 0:
-		edit = Edit.gql('WHERE ANCESTOR IS :document AND version = :version', document=document, version=version).get()
+		edit = get_edit_query(document, version).get()
 		return (edit.cached_document_name, edit.cached_document_tags, edit.cached_document_user_ids, edit.cached_document_content)
 	else:
 		base_name = None
@@ -432,14 +500,14 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 	edit = Edit(parent=document, account=user_account, version=document.version + 1)
 	puts = [document, edit, document_account]
 	conflicts = []
-	content = None	
+	content = None
 
 	document_user_id = document_account.user.user_id()
 	if document_user_id in user_ids_removed:
 		user_ids_removed.remove(document_user_id)
 	
 	if (patches != None):
-		dmp.Match_Threshold = 1.0
+		dmp.Match_Threshold = 0.75
 		patches = dmp.patch_fromText(patches)
 		results = dmp.patch_apply(patches, body.content)
 		content = results[0]
@@ -877,7 +945,7 @@ class DocumentsCronHandler(BaseHandler):
 		#		to_delete.append(deleted)
 		#db.delete(to_delete)
 
-def real_main():
+def main():
 	application = webapp.WSGIApplication([
 		('/admin/?', AdminHandler),
 		('/documents', ClientHandler),
@@ -893,18 +961,5 @@ def real_main():
 		
 	wsgiref.handlers.CGIHandler().run(application)
 
-see this page. do i need to inclue main function?
-http://code.google.com/appengine/docs/python/runtime.html#App_Caching
-
-def profile_main():
-	import cProfile, pstats, StringIO
-	prof = cProfile.Profile()
-	prof = prof.runctx("real_main()", globals(), locals())
-	stream = StringIO.StringIO()
-	stats = pstats.Stats(prof, stream=stream)
-	stats.sort_stats("time")  # Or cumulative
-	stats.print_stats(80)  # 80 = how many to print
-	logging.info("Profile data:\n%s", stream.getvalue())
-
 if __name__ == '__main__':
-	real_main()
+	main()

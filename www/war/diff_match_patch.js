@@ -1168,11 +1168,11 @@ diff_match_patch.prototype.diff_prettyHtml = function(diffs) {
         .replace(/>/g, '&gt;').replace(/\n/g, '&para;<BR>');
     switch (op) {
       case DIFF_INSERT:
-        html[x] = '<INS STYLE="background:#E6FFE6;" TITLE="i=' + i + '">' +
+        html[x] = '<INS TITLE="i=' + i + '">' +
                 text + '</INS>';
         break;
       case DIFF_DELETE:
-        html[x] = '<DEL STYLE="background:#FFE6E6;" TITLE="i=' + i + '">' +
+        html[x] = '<DEL TITLE="i=' + i + '">' +
                 text + '</DEL>';
         break;
       case DIFF_EQUAL:
