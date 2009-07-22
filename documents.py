@@ -17,73 +17,6 @@ from google.appengine.api import memcache
 from google.appengine.ext.webapp import template
 
 #
-# Queries
-#
-
-account_by_user_id_query = None
-def get_account_by_user_id_query(user_id):
-	global account_by_user_id_query
-	if account_by_user_id_query:
-		account_by_user_id_query.bind(user_id)	
-	else:
-		account_by_user_id_query = Account.gql("WHERE user_id = :1", user_id)
-	return account_by_user_id_query
-
-account_by_user_query = None
-def get_account_by_user_query(user):
-	global account_by_user_query
-	if account_by_user_query:
-		account_by_user_query.bind(user)	
-	else:
-		account_by_user_query = Account.gql("WHERE user = :1", user)
-	return account_by_user_query
-
-documents_query = None
-def get_documents_query(user_id):
-	global documents_query
-	if documents_query:
-		documents_query.bind(user_id, False)
-	else:
-		documents_query = Document.gql("WHERE user_ids = :1 AND deleted = :2 ORDER BY name", user_id, False)
-	return documents_query
-
-edits_with_unresolved_conflicts_query = None
-def get_edits_with_unresolved_conflicts_query(account):
-	global edits_with_unresolved_conflicts_query
-	if edits_with_unresolved_conflicts_query:
-		edits_with_unresolved_conflicts_query.bind(account, False)
-	else:
-		edits_with_unresolved_conflicts_query = Edit.gql("WHERE account = :1 AND conflicts_resolved = :2 ORDER BY created DESC", account, False)
-	return edits_with_unresolved_conflicts_query
-
-body_query = None
-def get_body_query(document):
-	global body_query
-	if body_query:
-		body_query.bind(document)	
-	else:
-		body_query = Body.gql("WHERE ANCESTOR IS :1", document)
-	return body_query
-
-edits_query = None
-def get_edits_query(document, start, end):
-	global edits_query
-	if edits_query:
-		edits_query.bind(document=document, start=start, end=end)
-	else:
-		edits_query = Edit.gql('WHERE ANCESTOR IS :document AND version >= :start AND version <= :end ORDER BY version ASC', document=document, start=start, end=end)
-	return edits_query
-
-edit_query = None
-def get_edit_query(document, version):
-	global edit_query
-	if edit_query:
-		edit_query.bind(document=document, version=version)
-	else:
-		edit_query = Edit.gql('WHERE ANCESTOR IS :document AND version = :version', document=document, version=version)
-	return edit_query
-
-#
 # Models
 #
 
@@ -119,10 +52,12 @@ class Account(db.Model):
 	@classmethod
 	def get_account_for_user(cls, user):
 		if user:
-			account = get_account_by_user_id_query(user_id_for_user(user)).get()
+			account_by_user_id_query.bind(user_id_for_user(user))
+			account = account_by_user_id_query.get()
 
 			if account == None:
-				account = get_account_by_user_query(user).get()
+				account = account_by_user_query.bind(user)
+				account = account_by_user_query.get()
 				
 			if account == None:
 				account = Account(user=user, user_id=user_id_for_user(user))
@@ -138,10 +73,12 @@ class Account(db.Model):
 		return self.user == other.user if isinstance(other, Account) else False
 		
 	def get_documents(self):
-		return get_documents_query(self.user_id)
+		documents_query.bind(self.user_id, False)
+		return documents_query
 
 	def get_edits_with_unresolved_conflicts(self):
-		return get_edits_with_unresolved_conflicts_query(self)
+		edits_with_unresolved_conflicts_query.bind(self, False)
+		return edits_with_unresolved_conflicts_query
 
 class Document(db.Model):
 	version = db.IntegerProperty(required=True)
@@ -176,11 +113,13 @@ class Document(db.Model):
 
 	def get_body(self):
 		if not self.body:
-			self.body = get_body_query(self).get()
+			body_query.bind(self)
+			self.body = body_query.get()
 		return self.body
 		
 	def get_edits(self, start, end):
-		return get_edits_query(self, start, end).fetch((end - start) + 1)
+		edits_query.bind(document=self, start=start, end=end)
+		return edits_query.fetch((end - start) + 1)
 
 	def get_edits_in_json_read_form(self, start, end):
 		edits = {}
@@ -298,10 +237,17 @@ class Edit(db.Model):
 		if self.patches: content = dmp.patch_apply(dmp.patch_reverse(dmp.patch_fromText(self.patches.encode('ascii'))), content)[0]
 		return (name, tags, user_ids, content)
 
-#class Change(db.Model):
-#	effected_users = db.StringListProperty()
-#	document = db.StringProperty(required=True)
-#	change = db.StringProperty(required=True, choices=['a', 'r', 'd'])
+#
+# Queries
+#
+
+account_by_user_id_query = Account.gql("WHERE user_id = :1", None)
+account_by_user_query = Account.gql("WHERE user = :1", None)
+documents_query = Document.gql("WHERE user_ids = :1 AND deleted = :2 ORDER BY name", None, False)
+edits_with_unresolved_conflicts_query = Edit.gql("WHERE account = :1 AND conflicts_resolved = :2 ORDER BY created DESC", None, False)
+body_query = Body.gql("WHERE ANCESTOR IS :1", None)
+edits_query = Edit.gql('WHERE ANCESTOR IS :document AND version >= :start AND version <= :end ORDER BY version ASC', document=None, start=0, end=0)
+edit_query = Edit.gql('WHERE ANCESTOR IS :document AND version = :version', document=None, version=0)
 
 #
 # Controllers
@@ -323,7 +269,8 @@ def write_json_response(response, json):
 	response.headers['Content-Type'] = 'application/json'
 	response.out.write(simplejson.dumps(json))
 
-def write_deadline_exceeded_response(response, document):
+def write_deadline_exceeded_response(response, document, account_email):
+	logging.error("DeadlineExceededError %s %s" % (document, account_email))
 	response.response.clear()
 	response.response.set_status(500)
 	response.response.out.write("Document %s sync could not be completed in time. If this problem persists the document may be to big. Please delete the document and divide it into two smaller documents." % document)
@@ -405,7 +352,8 @@ def require_document_edit(f):
 		document_account = a[2]
 		document = a[3]
 		edit_version = a[4]
-		edit = get_edit_query(document, int(edit_version)).get()
+		edit_query.bind(document=document, version=int(edit_version))
+		edit = edit_query.get()
 
 		if edit == None:
 			handler.error(404)
@@ -443,7 +391,8 @@ def get_document_version(handler, document, version):
 	modulo = (version % document.edits_cache_modulo)
 
 	if modulo == 0:
-		edit = get_edit_query(document, version).get()
+		edit_query.bind(document=document, version=version)
+		edit = edit_query.get()
 		return (edit.cached_document_name, edit.cached_document_tags, edit.cached_document_user_ids, edit.cached_document_content)
 	else:
 		base_name = None
@@ -648,7 +597,7 @@ class DocumentsHandler(BaseHandler):
 			self.error(503)
 			return
 		except runtime.DeadlineExceededError:
-			self.write_deadline_exceeded_response(self.response, name)
+			self.write_deadline_exceeded_response(self.response, name, account.user.email())
 			return
 		
 		self.response.set_status(201)
@@ -749,7 +698,7 @@ class DocumentHandler(BaseHandler):
 		except db.TransactionFailedError:
 			self.error(503)
 		except runtime.DeadlineExceededError:
-			self.write_deadline_exceeded_response(self.response, document.name)
+			self.write_deadline_exceeded_response(self.response, document.name, user_account.user.email())
 			
 	@require_account
 	def delete(self, user_account, document_account_id, document_id):
@@ -824,7 +773,7 @@ class DocumentEditsHandler(BaseHandler):
 		except db.TransactionFailedError:
 			self.error(503)
 		except runtime.DeadlineExceededError:
-			self.write_deadline_exceeded_response(self.response, document_id)
+			self.write_deadline_exceeded_response(self.response, document_id, user_account.user.email())
 
 class DocumentEditHandler(BaseHandler):
 	@require_document_edit
