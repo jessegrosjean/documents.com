@@ -685,16 +685,11 @@ class DocumentHandler(BaseHandler):
 				
 			document_account, document, body, edit, name = db.run_in_transaction(post_document_edit, self, user_account, document_account.key().id(), document.key().id(), version, name, tags_added, tags_removed, user_ids_added, user_ids_removed, patches, end_quota - start_quota)
 			document.clearMemcache(user_ids_removed)
-			document_edits = document.get_edits_in_json_read_form(version, document.version)
-			document_edits['content'] = body.content
-			
-			if name:
-				document_edits['name'] = name;
-			
+			document_state = document.to_document_dictionary()
 			if edit.conflicts:
-				document_edits["conflicts"] = edit.conflicts
+				document_state["conflicts"] = edit.conflicts
 				
-			write_json_response(self.response, document_edits)
+			write_json_response(self.response, document_state)
 		except db.TransactionFailedError:
 			self.error(503)
 		except runtime.DeadlineExceededError:
