@@ -8,8 +8,10 @@ import wsgiref.handlers
 from django.utils import simplejson
 from diff_match_patch import diff_match_patch
 
+
 from google.appengine import runtime
 from google.appengine.ext import db
+from google.appengine.api import mail
 from google.appengine.api import users
 from google.appengine.ext import webapp
 from google.appengine.api import quota
@@ -55,17 +57,22 @@ class Account(db.Model):
 			account_by_user_id_query.bind(user_id_for_user(user))
 			account = account_by_user_id_query.get()
 
-			if account == None:
+			if account:
+				return account
+			else:
 				account = account_by_user_query.bind(user)
 				account = account_by_user_query.get()
 				
 			if account == None:
 				account = Account(user=user, user_id=user_id_for_user(user))
 				account.put()
+				mail_notification = "[%s New User] %s %s" % (service_name(), user.email(), user.nickname())
+				mail.send_mail(sender="jesse@hogbaysoftware.com", to="jesse@hogbaysoftware.com", subject=mail_notification, body=mail_notification)		
 			else:
 				account.user = user
 				account.user_id = user_id_for_user(user)
 				account.put()
+				
 			return account
 		return None
 
