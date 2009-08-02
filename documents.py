@@ -583,7 +583,8 @@ class DocumentsHandler(BaseHandler):
 		try:
 			jsonDocument = simplejson.loads(self.request.body)
 			name = jsonDocument.get('name')
-			name = 'Untitled' if name == None or len(name) == 0 else re.split(r"(\r\n|\r|\n)", name, 1)[0]
+			name = re.split(r"(\r\n|\r|\n)", name, 1)[0]
+			name = 'Untitled' if (name == None or len(name) == 0) else name
 			tags = list_from_string(jsonDocument.get('tags'))
 			user_ids = list_with_user_id(list_from_string(jsonDocument.get('user_ids')), user_id_for_user(account.user))
 			content = jsonDocument.get('content', '')
@@ -655,7 +656,8 @@ class DocumentHandler(BaseHandler):
 			version = jsonDocument.get('version')
 			version = None if version == None else int(version)
 			name = jsonDocument.get('name')
-			name = 'Untitled' if name == None or len(name) == 0 else re.split(r"(\r\n|\r|\n)", name, 1)[0]
+			name = re.split(r"(\r\n|\r|\n)", name, 1)[0]
+			name = 'Untitled' if (name == None or len(name) == 0) else name
 			tags = list_from_string(jsonDocument.get('tags'))
 			user_ids = list_from_string(jsonDocument.get('user_ids'))
 			content = jsonDocument.get('content', None)			
@@ -745,7 +747,8 @@ class DocumentEditsHandler(BaseHandler):
 			jsonDocument = simplejson.loads(self.request.body)
 			version = jsonDocument.get('version', None)
 			name = jsonDocument.get('name', None)
-			name = None if name == None or len(name) == 0 else re.split(r"(\r\n|\r|\n)", name, 1)[0]
+			name = re.split(r"(\r\n|\r|\n)", name, 1)[0]
+			name = "Untitled" if (name == None or len(name) == 0) else name
 			tags_added = list_from_string(jsonDocument.get('tags_added', None))
 			tags_removed = list_from_string(jsonDocument.get('tags_removed', None))
 			user_ids_added = list_from_string(jsonDocument.get('user_ids_added', None))
