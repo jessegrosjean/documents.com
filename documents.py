@@ -8,7 +8,6 @@ import wsgiref.handlers
 from django.utils import simplejson
 from diff_match_patch import diff_match_patch
 
-
 from google.appengine import runtime
 from google.appengine.ext import db
 from google.appengine.api import mail
@@ -748,7 +747,7 @@ class DocumentEditsHandler(BaseHandler):
 			version = jsonDocument.get('version', None)
 			name = jsonDocument.get('name', None)
 			name = re.split(r"(\r\n|\r|\n)", name, 1)[0] if name != None else None
-			name = "Untitled" if (name == None or len(name) == 0) else name
+			name = "Untitled" if name != None else None
 			tags_added = list_from_string(jsonDocument.get('tags_added', None))
 			tags_removed = list_from_string(jsonDocument.get('tags_removed', None))
 			user_ids_added = list_from_string(jsonDocument.get('user_ids_added', None))
