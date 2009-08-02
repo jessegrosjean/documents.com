@@ -583,7 +583,7 @@ class DocumentsHandler(BaseHandler):
 		try:
 			jsonDocument = simplejson.loads(self.request.body)
 			name = jsonDocument.get('name')
-			name = re.split(r"(\r\n|\r|\n)", name, 1)[0]
+			name = re.split(r"(\r\n|\r|\n)", name, 1)[0] if name != None else None
 			name = 'Untitled' if (name == None or len(name) == 0) else name
 			tags = list_from_string(jsonDocument.get('tags'))
 			user_ids = list_with_user_id(list_from_string(jsonDocument.get('user_ids')), user_id_for_user(account.user))
@@ -605,7 +605,7 @@ class DocumentsHandler(BaseHandler):
 			self.error(503)
 			return
 		except runtime.DeadlineExceededError:
-			self.write_deadline_exceeded_response(self.response, name, account.user.email())
+			write_deadline_exceeded_response(self.response, name, account.user.email())
 			return
 		
 		self.response.set_status(201)
@@ -656,7 +656,7 @@ class DocumentHandler(BaseHandler):
 			version = jsonDocument.get('version')
 			version = None if version == None else int(version)
 			name = jsonDocument.get('name')
-			name = re.split(r"(\r\n|\r|\n)", name, 1)[0]
+			name = re.split(r"(\r\n|\r|\n)", name, 1)[0] if name != None else None
 			name = 'Untitled' if (name == None or len(name) == 0) else name
 			tags = list_from_string(jsonDocument.get('tags'))
 			user_ids = list_from_string(jsonDocument.get('user_ids'))
@@ -702,7 +702,7 @@ class DocumentHandler(BaseHandler):
 		except db.TransactionFailedError:
 			self.error(503)
 		except runtime.DeadlineExceededError:
-			self.write_deadline_exceeded_response(self.response, document.name, user_account.user.email())
+			write_deadline_exceeded_response(self.response, document.name, user_account.user.email())
 			
 	@require_account
 	def delete(self, user_account, document_account_id, document_id):
@@ -747,7 +747,7 @@ class DocumentEditsHandler(BaseHandler):
 			jsonDocument = simplejson.loads(self.request.body)
 			version = jsonDocument.get('version', None)
 			name = jsonDocument.get('name', None)
-			name = re.split(r"(\r\n|\r|\n)", name, 1)[0]
+			name = re.split(r"(\r\n|\r|\n)", name, 1)[0] if name != None else None
 			name = "Untitled" if (name == None or len(name) == 0) else name
 			tags_added = list_from_string(jsonDocument.get('tags_added', None))
 			tags_removed = list_from_string(jsonDocument.get('tags_removed', None))
@@ -778,7 +778,7 @@ class DocumentEditsHandler(BaseHandler):
 		except db.TransactionFailedError:
 			self.error(503)
 		except runtime.DeadlineExceededError:
-			self.write_deadline_exceeded_response(self.response, document_id, user_account.user.email())
+			write_deadline_exceeded_response(self.response, document_id, user_account.user.email())
 
 class DocumentEditHandler(BaseHandler):
 	@require_document_edit
