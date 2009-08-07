@@ -44,6 +44,11 @@ def list_with_user_id(l, user_id):
 		l.append(user_id)
 	return l
 
+def get_dmp():
+	dmp = diff_match_patch()
+	dmp.Diff_Timeout = 0.5
+	return dmp
+
 class Account(db.Model):
 	user = db.UserProperty(required=True)
 	user_id = db.StringProperty()
@@ -405,8 +410,9 @@ def get_document_version(handler, document, version):
 		base_tags = None
 		base_user_ids = None
 		base_content = None
-		dmp = diff_match_patch()
+		dmp = get_dmp()
 		dmp.Match_Threshold = 0.0
+		dmp.Match_Distance = 0
 		
 		if modulo > (document.edits_cache_modulo / 2):
 			end_version = (version - modulo) + document.edits_cache_modulo
@@ -443,35 +449,38 @@ def get_document_version(handler, document, version):
 
 		return (base_name, base_tags, base_user_ids, base_content)
 
-def post_document_edit(handler, user_account, document_account_id, document_id, version, name, tags_added, tags_removed, user_ids_added, user_ids_removed, patches, used_quota):
+def post_document_edit(handler, user_account, document_account_id, document_id, version, name, tags_added, tags_removed, user_ids_added, user_ids_removed, patches_text, used_quota):
 	start_quota = quota.get_request_cpu_usage()
 	
 	document, document_account = get_document_and_document_account(handler, user_account, document_account_id, document_id)
 	if document == None or document_account == None:
 		return None, None, None
 		
-	dmp = diff_match_patch()
+	dmp = get_dmp()
 	body = document.get_body()
 	edit = Edit(parent=document, account=user_account, version=document.version + 1)
 	puts = [document, edit, document_account]
 	conflicts = []
 	content = None
+	patches = None
 
 	document_user_id = document_account.user.user_id()
 	if document_user_id in user_ids_removed:
 		user_ids_removed.remove(document_user_id)
 	
-	if (patches != None):
+	if (patches_text != None):
 		dmp.Match_Threshold = 0.5
-		patches = dmp.patch_fromText(patches)
+		patches = dmp.patch_fromText(patches_text)
 		results = dmp.patch_apply(patches, body.content)
 		content = results[0]
 		applied = results[1]
 		index = 0
-		for each in applied;
+		for each in applied:
 			if each == False:
-				logging.error(patches)
-				logging.error(results)
+				logging.error(body.content)
+				logging.error(content)
+				logging.error(applied)
+				logging.error(patches_text)
 				logging.error(index)
 				conflicts.append(dmp.patch_toText([patches[index]]))
 			index += 1
@@ -481,9 +490,9 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 		edit.conflicts_resolved = False
 	
 	if (content != None and content != body.content):
-		patches = dmp.patch_make(body.content, content)
-		patches = dmp.patch_toText(patches)
-		edit.patches = patches
+		dmp.Match_Threshold = 0.0
+		dmp.Match_Distance = 0
+		edit.patches = dmp.patch_toText(dmp.patch_make(body.content, content))
 		body.content = content
 		body.content_size = len(content)
 		puts.append(body)
@@ -677,6 +686,8 @@ class DocumentHandler(BaseHandler):
 			if content != None:
 				content = re.sub(r"(\r\n|\r)", "\n", content)
 				dmp = diff_match_patch()
+				dmp.Match_Threshold = 0.0
+				dmp.Match_Distance = 0
 				patches = dmp.patch_toText(dmp.patch_make(version_content, content))
 			else:
 				patches = None
@@ -903,7 +914,7 @@ class DocumentsCronHandler(BaseHandler):
 		#		to_delete.append(deleted)
 		#db.delete(to_delete)
 
-def main():
+def real_main():
 	application = webapp.WSGIApplication([
 		('/admin/?', AdminHandler),
 		('/documents', ClientHandler),
@@ -918,6 +929,23 @@ def main():
 		], debug=True)
 		
 	wsgiref.handlers.CGIHandler().run(application)
+
+def profile_main():
+	# This is the main function for profiling 
+	# We've renamed our original main() above to real_main()
+	import cProfile, pstats, StringIO
+	prof = cProfile.Profile()
+	prof = prof.runctx("real_main()", globals(), locals())
+	stream = StringIO.StringIO()
+	stats = pstats.Stats(prof, stream=stream)
+	stats.sort_stats("time")  # Or cumulative
+	stats.print_stats(80)  # 80 = how many to print
+	# The rest is optional.
+	# stats.print_callees()
+	# stats.print_callers()
+	logging.info("Profile data:\n%s", stream.getvalue())
+
+main = real_main
 
 if __name__ == '__main__':
 	main()

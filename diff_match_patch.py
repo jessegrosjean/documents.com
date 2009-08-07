@@ -285,6 +285,7 @@ class diff_match_patch:
         text.append(lineArray[ord(char)])
       diffs[x] = (diffs[x][0], "".join(text))
 
+
   def diff_map(self, text1, text2):
     """Explore the intersection points between the two texts.
 
@@ -298,7 +299,9 @@ class diff_match_patch:
 
     # Unlike in most languages, Python counts time in seconds.
     s_end = time.time() + self.Diff_Timeout  # Don't run for too long.
-    max_d = len(text1) + len(text2) - 1
+    text1_len = len(text1)
+    text2_len = len(text2)
+    max_d = text1_len + text2_len - 1
     doubleEnd = self.Diff_DualThreshold * 2 < max_d
     v_map1 = []
     v_map2 = []
@@ -310,7 +313,7 @@ class diff_match_patch:
     done = False
     # If the total number of characters is odd, then the front path will
     # collide with the reverse path.
-    front = (len(text1) + len(text2)) % 2
+    front = (text1_len + text2_len) % 2
     for d in xrange(max_d):
       # Bail out if timeout reached.
       if self.Diff_Timeout > 0 and time.time() > s_end:
@@ -331,7 +334,7 @@ class diff_match_patch:
           if not front:
             footsteps[footstep] = d
 
-        while (not done and x < len(text1) and y < len(text2) and
+        while (not done and x < text1_len and y < text2_len and
                text1[x] == text2[y]):
           x += 1
           y += 1
@@ -344,7 +347,7 @@ class diff_match_patch:
 
         v1[k] = x
         v_map1[d][(x, y)] = True
-        if x == len(text1) and y == len(text2):
+        if x == text1_len and y == text2_len:
           # Reached the end in single-path mode.
           return self.diff_path1(v_map1, text1, text2)
         elif done:
@@ -363,16 +366,16 @@ class diff_match_patch:
           else:
             x = v2[k - 1] + 1
           y = x - k
-          footstep = (len(text1) - x, len(text2) - y)
+          footstep = (text1_len - x, text2_len - y)
           if not front and footstep in footsteps:
             done = True
           if front:
             footsteps[footstep] = d
-          while (not done and x < len(text1) and y < len(text2) and
+          while (not done and x < text1_len and y < text2_len and
                  text1[-x - 1] == text2[-y - 1]):
             x += 1
             y += 1
-            footstep = (len(text1) - x, len(text2) - y)
+            footstep = (text1_len - x, text2_len - y)
             if not front and footstep in footsteps:
               done = True
             if front:
@@ -383,14 +386,16 @@ class diff_match_patch:
           if done:
             # Reverse path ran over front path.
             v_map1 = v_map1[:footsteps[footstep] + 1]
-            a = self.diff_path1(v_map1, text1[:len(text1) - x],
-                                text2[:len(text2) - y])
-            b = self.diff_path2(v_map2, text1[len(text1) - x:],
-                                text2[len(text2) - y:])
+            a = self.diff_path1(v_map1, text1[:text1_len - x],
+                                text2[:text2_len - y])
+            b = self.diff_path2(v_map2, text1[text1_len - x:],
+                                text2[text2_len - y:])
             return a + b
 
     # Number of diffs equals number of characters, no commonality at all.
     return None
+
+
 
   def diff_path1(self, v_map, text1, text2):
     """Work from the middle back to the start to determine the path.
