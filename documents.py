@@ -462,13 +462,17 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 		user_ids_removed.remove(document_user_id)
 	
 	if (patches != None):
-		dmp.Match_Threshold = 0.75
+		dmp.Match_Threshold = 0.5
 		patches = dmp.patch_fromText(patches)
 		results = dmp.patch_apply(patches, body.content)
 		content = results[0]
+		applied = results[1]
 		index = 0
-		for result in results[1]:
-			if result == False:
+		for each in applied;
+			if each == False:
+				logging.error(patches)
+				logging.error(results)
+				logging.error(index)
 				conflicts.append(dmp.patch_toText([patches[index]]))
 			index += 1
 	
@@ -581,7 +585,7 @@ class DocumentsHandler(BaseHandler):
 	def post(self, account):
 		try:
 			jsonDocument = simplejson.loads(self.request.body)
-			name = jsonDocument.get('name')
+			name = jsonDocument.get('name', None)
 			name = re.split(r"(\r\n|\r|\n)", name, 1)[0] if name != None else None
 			name = 'Untitled' if (name == None or len(name) == 0) else name
 			tags = list_from_string(jsonDocument.get('tags'))
@@ -654,9 +658,9 @@ class DocumentHandler(BaseHandler):
 			jsonDocument = simplejson.loads(self.request.body)
 			version = jsonDocument.get('version')
 			version = None if version == None else int(version)
-			name = jsonDocument.get('name')
+			name = jsonDocument.get('name', None)
 			name = re.split(r"(\r\n|\r|\n)", name, 1)[0] if name != None else None
-			name = 'Untitled' if (name == None or len(name) == 0) else name
+			name = 'Untitled' if (name != None and len(name) == 0) else name
 			tags = list_from_string(jsonDocument.get('tags'))
 			user_ids = list_from_string(jsonDocument.get('user_ids'))
 			content = jsonDocument.get('content', None)			
@@ -747,7 +751,7 @@ class DocumentEditsHandler(BaseHandler):
 			version = jsonDocument.get('version', None)
 			name = jsonDocument.get('name', None)
 			name = re.split(r"(\r\n|\r|\n)", name, 1)[0] if name != None else None
-			name = "Untitled" if name != None else None
+			name = 'Untitled' if (name != None and len(name) == 0) else name
 			tags_added = list_from_string(jsonDocument.get('tags_added', None))
 			tags_removed = list_from_string(jsonDocument.get('tags_removed', None))
 			user_ids_added = list_from_string(jsonDocument.get('user_ids_added', None))
@@ -816,9 +820,6 @@ class DocumentEditHandler(BaseHandler):
 
 class DocumentsCronHandler(BaseHandler):
 	def get(self):
-		if True:			
-			return
-		
 		def delete_document_txn(document):
 			to_delete = []
 			
@@ -836,6 +837,10 @@ class DocumentsCronHandler(BaseHandler):
 		
 		for each in Document.gql('WHERE deleted = True').fetch(10):
 			db.run_in_transaction(delete_document_txn, each)
+			
+		if True:			
+			return
+			
 			
 		query = Body.gql('ORDER BY __key__')
 
