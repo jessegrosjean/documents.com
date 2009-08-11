@@ -285,7 +285,6 @@ class diff_match_patch:
         text.append(lineArray[ord(char)])
       diffs[x] = (diffs[x][0], "".join(text))
 
-
   def diff_map(self, text1, text2):
     """Explore the intersection points between the two texts.
 
@@ -299,9 +298,7 @@ class diff_match_patch:
 
     # Unlike in most languages, Python counts time in seconds.
     s_end = time.time() + self.Diff_Timeout  # Don't run for too long.
-    text1_len = len(text1)
-    text2_len = len(text2)
-    max_d = text1_len + text2_len - 1
+    max_d = len(text1) + len(text2) - 1
     doubleEnd = self.Diff_DualThreshold * 2 < max_d
     v_map1 = []
     v_map2 = []
@@ -313,7 +310,7 @@ class diff_match_patch:
     done = False
     # If the total number of characters is odd, then the front path will
     # collide with the reverse path.
-    front = (text1_len + text2_len) % 2
+    front = (len(text1) + len(text2)) % 2
     for d in xrange(max_d):
       # Bail out if timeout reached.
       if self.Diff_Timeout > 0 and time.time() > s_end:
@@ -334,7 +331,7 @@ class diff_match_patch:
           if not front:
             footsteps[footstep] = d
 
-        while (not done and x < text1_len and y < text2_len and
+        while (not done and x < len(text1) and y < len(text2) and
                text1[x] == text2[y]):
           x += 1
           y += 1
@@ -347,7 +344,7 @@ class diff_match_patch:
 
         v1[k] = x
         v_map1[d][(x, y)] = True
-        if x == text1_len and y == text2_len:
+        if x == len(text1) and y == len(text2):
           # Reached the end in single-path mode.
           return self.diff_path1(v_map1, text1, text2)
         elif done:
@@ -366,16 +363,16 @@ class diff_match_patch:
           else:
             x = v2[k - 1] + 1
           y = x - k
-          footstep = (text1_len - x, text2_len - y)
+          footstep = (len(text1) - x, len(text2) - y)
           if not front and footstep in footsteps:
             done = True
           if front:
             footsteps[footstep] = d
-          while (not done and x < text1_len and y < text2_len and
+          while (not done and x < len(text1) and y < len(text2) and
                  text1[-x - 1] == text2[-y - 1]):
             x += 1
             y += 1
-            footstep = (text1_len - x, text2_len - y)
+            footstep = (len(text1) - x, len(text2) - y)
             if not front and footstep in footsteps:
               done = True
             if front:
@@ -386,16 +383,14 @@ class diff_match_patch:
           if done:
             # Reverse path ran over front path.
             v_map1 = v_map1[:footsteps[footstep] + 1]
-            a = self.diff_path1(v_map1, text1[:text1_len - x],
-                                text2[:text2_len - y])
-            b = self.diff_path2(v_map2, text1[text1_len - x:],
-                                text2[text2_len - y:])
+            a = self.diff_path1(v_map1, text1[:len(text1) - x],
+                                text2[:len(text2) - y])
+            b = self.diff_path2(v_map2, text1[len(text1) - x:],
+                                text2[len(text2) - y:])
             return a + b
 
     # Number of diffs equals number of characters, no commonality at all.
     return None
-
-
 
   def diff_path1(self, v_map, text1, text2):
     """Work from the middle back to the start to determine the path.
@@ -1481,7 +1476,7 @@ class diff_match_patch:
       Two element Array, containing the new text and an array of boolean values.
     """
     if not patches:
-      return (text, [])
+      return (text, [], [])
 
     # Deep copy the patches so that no changes are made to originals.
     patches = self.patch_deepCopy(patches)
@@ -1496,6 +1491,7 @@ class diff_match_patch:
     # has an effective expected position of 22.
     delta = 0
     results = []
+    results_patches = []
     for patch in patches:
       expected_loc = patch.start2 + delta
       text1 = self.diff_text1(patch.diffs)
@@ -1503,9 +1499,11 @@ class diff_match_patch:
       if start_loc == -1:
         # No match found.  :(
         results.append(False)
+        results_patches.append(patch)
       else:
         # Found a match.  :)
         results.append(True)
+        results_patches.append(patch)
         delta = start_loc - expected_loc
         text2 = text[start_loc : start_loc + len(text1)]
         if text1 == text2:
@@ -1531,7 +1529,7 @@ class diff_match_patch:
               index1 += len(data)
     # Strip the padding off.
     text = text[len(nullPadding):-len(nullPadding)]
-    return (text, results)
+    return (text, results, results_patches)
 
   def patch_addPadding(self, patches):
     """Add some padding on text start and end so that edges can match
@@ -1756,19 +1754,6 @@ class diff_match_patch:
         del text[0]
     return patches
 
-  def patch_reverse(self, patches):
-    """Given an array of patches, return new array of patches that will reverse those patches.
-
-    Args:
-      patches: Array of patch objects.
-
-    Returns:
-      New array of patch objects.
-    """
-    reversed_patches = []
-    for patch in patches:
-      reversed_patches.append(patch.reverse())
-    return reversed_patches
 
 class patch_obj:
   """Class representing one patch operation.
@@ -1816,20 +1801,3 @@ class patch_obj:
       data = data.encode("utf-8")
       text.append(urllib.quote(data, "!~*'();/?:@&=+$,# ") + "\n")
     return "".join(text)
-
-  def reverse(self):
-    """Returns new patch that will reverse the effects of this patch.
-    """
-    reverse = patch_obj()
-    reverse.start1 = self.start2
-    reverse.start2 = self.start1
-    reverse.length1 = self.length2
-    reverse.length2 = self.length1
-    for (op, data) in self.diffs:
-      if op == diff_match_patch.DIFF_INSERT:
-        op = diff_match_patch.DIFF_DELETE
-      elif op == diff_match_patch.DIFF_DELETE:
-        op = diff_match_patch.DIFF_INSERT
-      reverse.diffs.append((op, data))
-    return reverse
-

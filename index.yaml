@@ -10,11 +10,11 @@ indexes:
 # automatically uploaded to the admin console when you next deploy
 # your application using appcfg.py.
 
-# Used 6 times in query history.
+# Used 17 times in query history.
 - kind: Body
   ancestor: yes
 
-# Used 3 times in query history.
+# Used 6 times in query history.
 - kind: Document
   properties:
   - name: deleted
@@ -33,8 +33,28 @@ indexes:
 - kind: Edit
   ancestor: yes
 
-# Used once in query history.
+# Unused in query history -- copied from input.
 - kind: Edit
   ancestor: yes
   properties:
   - name: version
+
+# Used 8 times in query history.
+- kind: Revision
+  properties:
+  - name: account
+  - name: conflicts_resolved
+  - name: __key__
+    direction: desc
+
+# Used 2 times in query history.
+- kind: Revision
+  properties:
+  - name: account
+  - name: conflicts_resolved
+  - name: created
+    direction: desc
+
+# Unused in query history -- copied from input.
+- kind: Revision
+  ancestor: yes

@@ -469,11 +469,10 @@ def post_document_edit(handler, user_account, document_account_id, document_id, 
 		user_ids_removed.remove(document_user_id)
 	
 	if (patches_text != None):
-		dmp.Match_Threshold = 0.5
+		dmp.Match_Threshold = 0.75
 		patches = dmp.patch_fromText(patches_text)
-		results = dmp.patch_apply(patches, body.content)
-		content = results[0]
-		applied = results[1]
+		dmp.patch_splitMax(patches)
+		content, applied = dmp.patch_apply(patches, body.content)
 		index = 0
 		for each in applied:
 			if each == False:
