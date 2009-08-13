@@ -378,7 +378,7 @@ class DocumentsHandler(BaseHandler):
 		self.response.headers.add_header("Location", document.uri())
 		write_json_response(self.response, document.to_document_dictionary())
 		
-def delta_update_document_txn(handler, user_account, document_account_id, document_id, version, name, patches, tags_added, tags_removed, user_ids_added, user_ids_removed):
+def delta_update_document_txn(handler, user_account, document_account_id, document_id, version, name, patches, tags_added, tags_removed, user_ids_added, user_ids_removed, always_return_content=False):
 	start_quota = quota.get_request_cpu_usage()
 	
 	document, document_account = get_document_and_document_account(handler, user_account, document_account_id, document_id)
@@ -433,7 +433,7 @@ def delta_update_document_txn(handler, user_account, document_account_id, docume
 	db.put(puts)
 	document.clearMemcache(user_ids_removed)
 
-	if version != document.version - 1:
+	if version != document.version - 1 or always_return_content:
 		jsonResults = document.to_document_dictionary()
 		if revision.conflicts_resolved == False:
 			jsonResults["conflicts"] = revision.conflicts
@@ -554,8 +554,8 @@ class DocumentEditsLegacyHandler(BaseHandler):
 			user_ids_added = list_from_string(jsonDocument.get('user_ids_added'))
 			user_ids_removed = list_from_string(jsonDocument.get('user_ids_removed'))
 
-			results = db.run_in_transaction(delta_update_document_txn, self, user_account, document_account_id, document_id, version, name, patches, tags_added, tags_removed, user_ids_added, user_ids_removed)
-			
+			results = db.run_in_transaction(delta_update_document_txn, self, user_account, document_account_id, document_id, version, name, patches, tags_added, tags_removed, user_ids_added, user_ids_removed, True)
+	
 			if results:
 				write_json_response(self.response, results)
 		except db.TransactionFailedError:
