@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import zlib
 import logging
 import datetime
@@ -7,7 +8,7 @@ import operator
 import wsgiref.handlers
 
 from django.utils import simplejson
-from diff_match_patch import diff_match_patch
+from diff_match_patch2 import diff_match_patch
 
 from google.appengine import runtime
 from google.appengine.ext import db
@@ -51,9 +52,9 @@ def list_with_user_id(l, user_id):
 class Account(db.Model):
 	user = db.UserProperty(required=True)
 	user_id = db.StringProperty()
+	model_version = db.IntegerProperty(default=0)
 	documents_size = db.IntegerProperty(required=True, default=0)
 	documents_cpu = db.IntegerProperty(default=0)
-	model_version = db.IntegerProperty(default=0)
 
 	@classmethod
 	def get_account_for_user(cls, user):
@@ -87,7 +88,7 @@ class Account(db.Model):
 		documents_query.bind(self.user_id, False)
 		return documents_query
 
-class CompressedTextProperty(db.UnindexedProperty):
+class CompressedTextProperty(db.TextProperty):
 	def get_value_for_datastore(self, model_instance): 
 		value = super(CompressedTextProperty, self).get_value_for_datastore(model_instance)
 		if value:
@@ -104,6 +105,7 @@ class CompressedTextProperty(db.UnindexedProperty):
 class Document(db.Model):
 	version = db.IntegerProperty(required=True)
 	last_revision = db.DateTimeProperty(required=True, auto_now_add=True)
+	revisions_count = db.IntegerProperty(required=True, default=0)
 	name = db.StringProperty(required=True, default="Untitled")
 	name_version = db.IntegerProperty(required=True, default=0)
 	size = db.IntegerProperty(required=True, default=0)
@@ -116,18 +118,6 @@ class Document(db.Model):
 	
 	def id_string(self):
 		return "%s-%s" % (self.parent_key().id(), self.key().id())
-				
-	def tags_string(self):
-		if len(self.tags) > 0:
-			return ' '.join(self.tags)
-		else:
-			return ""
-
-	def user_ids_string(self):
-		if len(self.user_ids) > 0:
-			return ' '.join(self.user_ids)
-		else:
-			return ""
 	
 	def uri(self):
 		return "/documents/%s" % self.id_string()
@@ -137,18 +127,14 @@ class Document(db.Model):
 			body_query.bind(self)
 			self.body = body_query.get()
 		return self.body
-		
-	def get_edits(self, start, end):
-		edits_query.bind(document=self, start=start, end=end)
-		return edits_query.fetch((end - start) + 1)
 	
 	def to_index_dictionary(self):
 		return { 'id': self.id_string(), 'version': self.version, 'name': self.name }
 
 	def to_document_dictionary(self):
-		return { 'owner' : self.parent().user.email(), 'id': self.id_string(), 'name': self.name, 'version': self.version, 'content': self.get_body().content, 'created': str(self.created), 'modified': str(self.modified) }
+		return { 'owner' : self.parent().user.email(), 'id': self.id_string(), 'name': self.name, 'version': self.version, 'created': str(self.created), 'modified': str(self.modified), 'tags' : self.tags, 'user_ids' : self.user_ids, 'content': self.get_body().content }
 		
-	def create_revision(self, user_account, document_account, content, conflicts=None):
+	def create_revision(self, user_account, document_account, content, levenshtein, conflicts=None):
 		key_date = datetime.datetime.utcnow()
 		
 		if self.last_revision >= key_date:
@@ -157,12 +143,13 @@ class Document(db.Model):
 		if key_date.microsecond != 0:
 			key_date = key_date + datetime.timedelta(microseconds=-key_date.microsecond)
 
-		revision = Revision(key_name="k:%s" % key_date.isoformat('_').replace(':', '.'), parent=self, account=user_account, version=self.version, name=self.name, user_ids=self.user_ids, tags=self.tags, content=content)
+		revision = Revision(key_name="k:%s" % key_date.isoformat('_').replace(':', '.'), parent=self, account=user_account, name=self.name, user_ids=self.user_ids, tags=self.tags, content=content, levenshtein=levenshtein)
 
 		if conflicts != None and len(conflicts) > 0:
 			revision.conflicts = ''.join(conflicts)
 			revision.conflicts_resolved = False
 
+		self.revisions_count += 1
 		self.size += revision.size()
 		self.last_revision = key_date
 		document_account.documents_size += revision.size()
@@ -179,7 +166,7 @@ class Body(db.Model):
 
 class Revision(db.Model):
 	account = db.ReferenceProperty(Account, required=True)
-	version = db.IntegerProperty(required=True)
+	levenshtein = db.IntegerProperty(required=True, default=0)
 	name = db.StringProperty()
 	tags = db.StringListProperty()
 	user_ids = db.StringListProperty()
@@ -191,13 +178,16 @@ class Revision(db.Model):
 		return self.parent() != None
 
 	def uri(self):
-		return "/documents/%s/revision/%i" % (self.parent().id_string(), self.version)
+		return "/documents/%s/revision/%i" % (self.parent().id_string(), self.key().name()[2:])
 		
 	def to_revision_dictionary(self):
-		return { 'id' : self.key().name()[2:], 'document_id' : self.parent().id_string(), 'version': self.version, 'name': self.name, 'tags' : self.tags, 'user_ids' : self.user_ids, 'content': self.content, 'conflicts' : self.conflicts, 'conflicts_resolved' : self.conflicts_resolved }
+		return { 'id' : self.key().name()[2:], 'document_id' : self.parent().id_string(), 'name': self.name, 'tags' : self.tags, 'user_ids' : self.user_ids, 'content': self.content, 'conflicts' : self.conflicts, 'conflicts_resolved' : self.conflicts_resolved }
 		
 	def size(self):
-		return 0
+		if self.conflicts:
+			return len(self.content) + len(self.conflicts)
+		else:
+			return len(self.content)
 
 #
 # Queries
@@ -208,7 +198,7 @@ account_by_user_query = Account.gql("WHERE user = :1", None)
 documents_query = Document.gql("WHERE user_ids = :1 AND deleted = :2 ORDER BY name", None, False)
 body_query = Body.gql("WHERE ANCESTOR IS :1", None)
 revisions_with_unresolved_conflicts_query = Revision.gql("WHERE account = :1 AND conflicts_resolved = :2 ORDER BY __key__ DESC", None, False)
-revisions_keys_query = db.GqlQuery("SELECT __key__ FROM Revision WHERE ANCESTOR IS :1 ORDER BY __key__ ASC", None, None)
+revisions_keys_query = db.GqlQuery("SELECT __key__ FROM Revision WHERE ANCESTOR IS :1 ORDER BY __key__ DESC", None, None)
 
 #
 # Controllers
@@ -274,8 +264,8 @@ def require_revision(f):
 		user_account = a[1]
 		document_account = a[2]
 		document = a[3]
-		revision_key_name = 'k:%s' % a[4]
-		revision = Revision.get_by_key_name(revision_key_name, document)
+		revision_id = 'k:%s' % a[4]
+		revision = Revision.get_by_key_name(revision_id, document)
 		
 		if not revision:
 			handler.error(401)
@@ -368,11 +358,11 @@ class DocumentsHandler(BaseHandler):
 			content = re.sub(r"(\r\n|\r)", "\n", content)
 
 			def create_document_txn():
-				document = Document(parent=account, version=0, edits_size=len(name) + len(content), edits_cache_modulo=10, name=name, tags=tags, user_ids=user_ids)
+				document = Document(parent=account, version=0, name=name, tags=tags, user_ids=user_ids, size=len(content), revisions_count=1)
 				document.put()
-				revision = document.create_revision(account, account, content)
+				revision = document.create_revision(account, account, content, sys.maxint)
 				body = Body(parent=document, content=content, content_size=len(content))
-				db.put([revision, body, account])
+				db.put([body, revision, account])
 				return document
 		
 			document = db.run_in_transaction(create_document_txn)
@@ -398,13 +388,14 @@ def delta_update_document_txn(handler, user_account, document_account_id, docume
 
 	document.version = document.version + 1
 	puts = [document, document_account]
-	create_revision = False
+	levenshtein = (len(tags_added) + len(tags_removed) + len(user_ids_added) + len(user_ids_removed)) * 10
 	conflicts = []
 
 	if (name != None and name != document.name):
 		if version >= document.name_version:
 			document.name = name
 			document.name_version = document.version;
+			levenshtein += 10
 
 	if len(tags_added) > 0: document.tags = list_union(document.tags, tags_added)
 	if len(tags_removed) > 0: document.tags = list_minus(document.tags, tags_removed)
@@ -414,7 +405,7 @@ def delta_update_document_txn(handler, user_account, document_account_id, docume
 	document_user_id = document_account.user.user_id()
 	if not document_user_id in document.user_ids:
 		document.user_ids.append(document_user_id)
-
+	
 	if (patches != None):
 		dmp.Match_Threshold = 0.75
 		patches = dmp.patch_fromText(patches)
@@ -431,16 +422,12 @@ def delta_update_document_txn(handler, user_account, document_account_id, docume
 		for each in results:
 			if each == False:
 				conflicts.append(dmp.patch_toText([results_patches[index]]))
-				create_revision = True
 			else:
-				for (op, data) in results_patches[index].diffs:
-					if op == diff_match_patch.DIFF_DELETE:
-						create_revision = True
+				levenshtein += dmp.diff_levenshtein(results_patches[index].diffs)
 			index += 1
 
-	if create_revision:
-		revision = document.create_revision(user_account, document_account, document.get_body().content, conflicts)
-		puts.append(revision)
+	revision = document.create_revision(user_account, document_account, document.get_body().content, levenshtein, conflicts)
+	puts.append(revision)
 
 	document_account.documents_cpu += (quota.get_request_cpu_usage() - start_quota)
 	db.put(puts)
@@ -448,8 +435,8 @@ def delta_update_document_txn(handler, user_account, document_account_id, docume
 
 	if version != document.version - 1:
 		jsonResults = document.to_document_dictionary()
-		if len(conflicts) > 0:
-			jsonResults["conflicts"] = conflicts
+		if revision.conflicts_resolved == False:
+			jsonResults["conflicts"] = revision.conflicts
 		return jsonResults
 	else:
 		return document.to_index_dictionary()
@@ -535,6 +522,47 @@ class DocumentRevisionHandler(BaseHandler):
 	def get(self, user_account, document_account, document, revision):
 		write_json_response(self.response, revision.to_revision_dictionary())
 
+	def post(self, account_id, document_id, revision_id):
+		method = self.request.headers.get('X-HTTP-Method-Override')
+		if (method == "PUT"):
+			self.put(account_id, document_id, revision_id)
+		else:
+			self.error(405)
+
+	@require_revision
+	def put(self, user_account, document_account, document, revision):
+		revision.conflicts_resolved = simplejson.loads(self.request.body).get('conflicts_resolved', False)
+		revision.put()
+
+class DocumentEditsLegacyHandler(BaseHandler):
+	@require_document
+	def get(self, user_account, document_account, document):
+		write_json_response(self.response, document.to_document_dictionary())
+
+	@require_account
+	def post(self, user_account, document_account_id, document_id):
+		try:
+			jsonDocument = simplejson.loads(self.request.body)
+			version = jsonDocument.get('version')
+			version = None if version == None else int(version)
+			name = jsonDocument.get('name', None)
+			name = re.split(r"(\r\n|\r|\n)", name, 1)[0] if name != None else None
+			name = 'Untitled' if (name != None and len(name) == 0) else name			
+			patches = jsonDocument.get('patches', None)
+			tags_added = list_from_string(jsonDocument.get('tags_added'))
+			tags_removed = list_from_string(jsonDocument.get('tags_removed'))
+			user_ids_added = list_from_string(jsonDocument.get('user_ids_added'))
+			user_ids_removed = list_from_string(jsonDocument.get('user_ids_removed'))
+
+			results = db.run_in_transaction(delta_update_document_txn, self, user_account, document_account_id, document_id, version, name, patches, tags_added, tags_removed, user_ids_added, user_ids_removed)
+			
+			if results:
+				write_json_response(self.response, results)
+		except db.TransactionFailedError:
+			self.error(503)
+		except runtime.DeadlineExceededError:
+			write_deadline_exceeded_response(self.response, document.name, user_account.user.email())
+
 class ConflictsHandler(BaseHandler):
 	@require_account
 	def get(self, account):
@@ -547,23 +575,25 @@ class ConflictsHandler(BaseHandler):
 
 class DocumentsCronHandler(BaseHandler):
 	def get(self):
-		def delete_document_txn(document):
-			to_delete = []
-			
-			revisions = db.GqlQuery("SELECT __key__ FROM Revision WHERE ANCESTOR IS :document", document=document).fetch(20)
-			to_delete.extend(revisions)
-			if (len(revisions) < 20):
-				account = document.parent()
-				account.documents_size -= document.size
-				to_delete.append(document)
-				body = document.get_body()
-				if body:
-					to_delete.append(body)
-				db.put(account)
-			db.delete(to_delete)
+		#def delete_document_txn(document):
+		#	to_delete = []
+		#	revisions = db.GqlQuery("SELECT __key__ FROM Revision WHERE ANCESTOR IS :document", document=document).fetch(20)
+		#	to_delete.extend(revisions)
+		#	if (len(revisions) < 20):
+		#		account = document.parent()
+		#		account.documents_size -= document.size
+		#		to_delete.append(document)
+		#		body = document.get_body()
+		#		if body:
+		#			to_delete.append(body)
+		#		db.put(account)
+		#	db.delete(to_delete)
+		#
+		#for each in Document.gql('WHERE deleted = True').fetch(5):
+		#	db.run_in_transaction(delete_document_txn, each)
+		pass
+		# prune revisions from big documents with lots of revisions
 		
-		for each in Document.gql('WHERE deleted = True').fetch(10):
-			db.run_in_transaction(delete_document_txn, each)
 
 def real_main():
 	application = webapp.WSGIApplication([
@@ -575,6 +605,9 @@ def real_main():
 		('/v1/documents/([0-9]+)-([0-9]+)/?', DocumentHandler),
 		('/v1/documents/([0-9]+)-([0-9]+)/revisions/?', DocumentRevisionsHandler),
 		('/v1/documents/([0-9]+)-([0-9]+)/revisions/(.+)/?', DocumentRevisionHandler),
+		
+		('/v1/documents/([0-9]+)-([0-9]+)/edits/?', DocumentEditsLegacyHandler),
+		
 		('/v1/cron', DocumentsCronHandler),
 		], debug=True)
 		
