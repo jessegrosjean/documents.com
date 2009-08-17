@@ -5,7 +5,7 @@ import sys
 import simplejson
 import documents_service_support
 
-class DocumentsService():
+class DocumentsService(object):
 	def __init__(self, service, service_host, user, password):
 		self.server = documents_service_support.HttpRpcServer(service_host, lambda: (user, password), documents_service_support.GetUserAgent(), service, save_cookies=True)
 	
@@ -26,9 +26,7 @@ class DocumentsService():
 			New document's server state.
 	"""
 	def POST_document(self, name, content):
-		return self.server.Send("/v1/documents", body=simplejson.dumps({ "name" : name, "content" : content }))
-		
-		return simplejson.loads(self.server.Send("/v1/documents"))
+		return simplejson.loads(self.server.Send("/v1/documents", body=simplejson.dumps({ "name" : name, "content" : content })))
 
 	""" Get server document.
 
@@ -37,11 +35,8 @@ class DocumentsService():
 		Returns:
 			Document dictionary with the keys: id, version, name, content
 	"""
-	def GET_document(self, id, version=None):
-		if version:
-			return simplejson.loads(self.server.Send("/v1/documents/%s/versions/%s" % (id, version)))
-		else:
-			return simplejson.loads(self.server.Send("/v1/documents/%s" % id))
+	def GET_document(self, id):
+		return simplejson.loads(self.server.Send("/v1/documents/%s" % id))
 
 	""" Update server document.
 
@@ -54,11 +49,11 @@ class DocumentsService():
 			Document's new state on server after applying your changes.
 			May also include a 'conflicts' key if there were conflicts.
 	"""
-	def PUT_document(self, id, version, name=None, content=None):
+	def PUT_document(self, id, version, name=None, patches=None):
 		body = {}
 		if version: body['version'] = version
 		if name: body['name'] = name
-		if content: body['content'] = content
+		if patches: body['patches'] = patches
 		return self.server.Send("/v1/documents/%s" % id, body=simplejson.dumps(body), method="PUT")
 
 	""" Delete document.
@@ -70,11 +65,23 @@ class DocumentsService():
 	def DELETE_document(self, id, version):
 		return self.server.Send("/v1/documents/%s" % id, method="DELETE", version=version)
 
-google_id = "google_id"
-google_pass = "google_pass"		
-documents_service = DocumentsService("hogbaywriteroom", "www.writeroom.ws", google_id, google_pass)
+	""" Get document revisions.
 
-for each_index_dictionary in documents_service.GET_documents():
-	each_full_dictionary = documents_service.GET_document(each_index_dictionary["id"])
-	print "----------------\nName: %s" % each_full_dictionary["name"]
-	print "Content: %s" % each_full_dictionary["content"]
+		Args:
+			document_id: Document's id
+		Returns:
+			Keys for each saved revision of the document.
+	"""
+	def GET_document_revisions(self, document_id):
+		return self.server.Send("/v1/documents/%s/revisions" % document_id)
+
+	""" Get document revision.
+
+		Args:
+			document_id: Document's id
+			revision_id: Revision's id
+		Returns:
+			Revisions dictionary with keys id, version, name, content
+	"""
+	def GET_document_revision(self, document_id, revision_id):
+		return self.server.Send("/v1/documents/%s/revisions/%s" % (document_id, revision_id))
