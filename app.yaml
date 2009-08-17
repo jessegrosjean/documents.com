@@ -18,16 +18,16 @@ handlers:
   upload: www/header_writeroom.png
 
 - url: /admin
-  script: documents2.py
+  script: documents.py
 
 - url: /documents
-  script: documents2.py
+  script: documents.py
 
 - url: /documents/
-  script: documents2.py
+  script: documents.py
 
 - url: /documents
   static_dir: www/war
     
 - url: /v1/.*
-  script: documents2.py
+  script: documents.py
