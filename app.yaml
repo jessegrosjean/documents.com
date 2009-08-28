@@ -1,4 +1,4 @@
-application: hogbaywriteroom
+application: hogbaytaskpaper
 version: 2
 runtime: python
 api_version: 1
@@ -6,16 +6,16 @@ api_version: 1
 handlers:
 
 - url: /
-  static_files: www/index_writeroom.html
-  upload: www/index_writeroom.html
+  static_files: www/index_taskpaper.html
+  upload: www/index_taskpaper.html
 
 - url: /favicon.ico
-  static_files: www/favicon_writeroom.ico
-  upload: www/favicon_writeroom.ico
+  static_files: www/favicon_taskpaper.ico
+  upload: www/favicon_taskpaper.ico
 
 - url: /header.png
-  static_files: www/header_writeroom.png
-  upload: www/header_writeroom.png
+  static_files: www/header_taskpaper.png
+  upload: www/header_taskpaper.png
 
 - url: /admin
   script: documents.py

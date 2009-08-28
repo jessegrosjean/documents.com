@@ -84,9 +84,14 @@ class Account(db.Model):
 	def __eq__(self, other):
 		return self.user == other.user if isinstance(other, Account) else False
 		
-	def get_documents(self):
-		documents_query.bind(self.user_id, False)
-		return documents_query
+	def get_documents(self, tag=None):
+		if tag:
+			documents_query_with_tag.bind(self.user_id, False, tag)
+			query = documents_query_with_tag
+		else:
+			documents_query.bind(self.user_id, False)
+			query = documents_query
+		return query
 
 class CompressedTextProperty(db.TextProperty):
 	def get_value_for_datastore(self, model_instance): 
@@ -189,6 +194,22 @@ class Revision(db.Model):
 		else:
 			return len(self.content)
 
+class Event(db.Model):
+	change = db.StringProperty(required=True)
+	effected_user_ids = db.StringListProperty(required=True)
+	
+	@classmethod
+	def new_created_event_for_document(cls, document):
+		return Event(parent=document.parent(), change = "%s:%s:0" % ("c", document.id_string()), effected_user_ids=document.user_ids)
+
+	@classmethod
+	def new_updated_event_for_document(cls, document, effected_user_ids):
+		return Event(parent=document.parent(), change = "%s:%s:%i" % ("u", document.id_string(), document.version), effected_user_ids=effected_user_ids)
+
+	@classmethod
+	def new_deleted_event_for_document(cls, document):
+		return Event(parent=document.parent(), change = "%s:%s:%i" % ("d", document.id_string(), document.version), effected_user_ids=document.user_ids)		
+
 #
 # Queries
 #
@@ -196,9 +217,13 @@ class Revision(db.Model):
 account_by_user_id_query = Account.gql("WHERE user_id = :1", None)
 account_by_user_query = Account.gql("WHERE user = :1", None)
 documents_query = Document.gql("WHERE user_ids = :1 AND deleted = :2 ORDER BY name", None, False)
+documents_query_with_tag = Document.gql("WHERE user_ids = :1 AND deleted = :2 AND tags = :3 ORDER BY name", None, False, None)
 body_query = Body.gql("WHERE ANCESTOR IS :1", None)
+events_query = Event.gql("WHERE effected_user_ids = :1 AND __key__ > :2 ORDER BY __key__ DESC", None, None)
 revisions_with_unresolved_conflicts_query = Revision.gql("WHERE account = :1 AND conflicts_resolved = :2 ORDER BY __key__ DESC", None, False)
-revisions_keys_query = db.GqlQuery("SELECT __key__ FROM Revision WHERE ANCESTOR IS :1 ORDER BY __key__ DESC", None, None)
+revisions_keys_query = db.GqlQuery("SELECT __key__ FROM Revision WHERE ANCESTOR IS :1 ORDER BY __key__ DESC", None)
+#prunable_document_keys_query = db.GqlQuery("SELECT __key__ FROM Document WHERE revisions_count > 10 ORDER BY revisions_count")
+#prunable_revision_keys_query = db.GqlQuery("SELECT __key__ FROM Revision WHERE ANCESTOR IS :1 AND  ORDER BY __key__ DESC", None)
 
 #
 # Controllers
@@ -334,10 +359,10 @@ class DocumentsHandler(BaseHandler):
 	def get(self, account):
 		cache_key = user_id_for_user(account.user)
 		cached_response = memcache.get(cache_key)
-
+		
 		if cached_response is None:
 			document_dicts = []
-			for document in account.get_documents():
+			for document in account.get_documents(tag=self.request.get('tag', None)):
 				document_dicts.append(document.to_index_dictionary())			
 			cached_response = simplejson.dumps(document_dicts)
 			memcache.set(cache_key, cached_response)
@@ -362,7 +387,8 @@ class DocumentsHandler(BaseHandler):
 				document.put()
 				revision = document.create_revision(account, account, content, sys.maxint)
 				body = Body(parent=document, content=content, content_size=len(content))
-				db.put([body, revision, account])
+				created_event = Event.new_created_event_for_document(document)
+				db.put([body, revision, created_event, account])
 				return document
 		
 			document = db.run_in_transaction(create_document_txn)
@@ -428,6 +454,9 @@ def delta_update_document_txn(handler, user_account, document_account_id, docume
 
 	revision = document.create_revision(user_account, document_account, document.get_body().content, levenshtein, conflicts)
 	puts.append(revision)
+
+	updated_event = Event.new_updated_event_for_document(document, document.user_ids + user_ids_removed)
+	puts.append(updated_event)
 
 	document_account.documents_cpu += (quota.get_request_cpu_usage() - start_quota)
 	db.put(puts)
@@ -497,7 +526,9 @@ class DocumentHandler(BaseHandler):
 				raise ValueError, "Version does not match document version"
 
 			document.deleted = True
-			db.put([document, document_account])
+			deleted_event = Event.new_deleted_event_for_document(document)			
+			
+			db.put([document, document_account, deleted_event])
 			return document
 
 		try:
@@ -573,27 +604,41 @@ class ConflictsHandler(BaseHandler):
 				conflict_dicts.append(revision.to_revision_dictionary())
 		write_json_response(self.response, conflict_dicts)
 
+class EventsHandler(BaseHandler):
+	@require_account
+	def get(self, account):
+		reference_point = self.request.get('reference_point', None)
+		if reference_point:
+		else:
+		
+		json_resonse = {}
+		json_response_events = []
+		json_resonse['events'] = json_response_events
+		
+		events_query.bind(account, )
+		for event in events_query.fetch(101):
+			json_response_events.append(event.change)
+		
+		write_json_response(self.response, event_strings)
+
 class DocumentsCronHandler(BaseHandler):
 	def get(self):
-		#def delete_document_txn(document):
-		#	to_delete = []
-		#	revisions = db.GqlQuery("SELECT __key__ FROM Revision WHERE ANCESTOR IS :document", document=document).fetch(20)
-		#	to_delete.extend(revisions)
-		#	if (len(revisions) < 20):
-		#		account = document.parent()
-		#		account.documents_size -= document.size
-		#		to_delete.append(document)
-		#		body = document.get_body()
-		#		if body:
-		#			to_delete.append(body)
-		#		db.put(account)
-		#	db.delete(to_delete)
-		#
-		#for each in Document.gql('WHERE deleted = True').fetch(5):
-		#	db.run_in_transaction(delete_document_txn, each)
-		pass
-		# prune revisions from big documents with lots of revisions
+		def delete_document_txn(document):
+			to_delete = []
+			revisions = db.GqlQuery("SELECT __key__ FROM Revision WHERE ANCESTOR IS :document", document=document).fetch(50)
+			to_delete.extend(revisions)
+			if (len(revisions) < 50):
+				account = document.parent()
+				account.documents_size -= document.size
+				to_delete.append(document)
+				body = document.get_body()
+				if body:
+					to_delete.append(body)
+				db.put(account)
+			db.delete(to_delete)
 		
+		for each in Document.gql('WHERE deleted = True').fetch(50):
+			db.run_in_transaction(delete_document_txn, each)		
 
 def real_main():
 	application = webapp.WSGIApplication([
@@ -602,6 +647,7 @@ def real_main():
 		('/documents/', ClientHandler),
 		('/v1/documents/?', DocumentsHandler),
 		('/v1/documents/conflicts/?', ConflictsHandler),
+		('/v1/documents/events/?', EventsHandler),
 		('/v1/documents/([0-9]+)-([0-9]+)/?', DocumentHandler),
 		('/v1/documents/([0-9]+)-([0-9]+)/revisions/?', DocumentRevisionsHandler),
 		('/v1/documents/([0-9]+)-([0-9]+)/revisions/(.+)/?', DocumentRevisionHandler),
