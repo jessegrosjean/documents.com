@@ -1,21 +1,37 @@
-application: hogbaytaskpaper
-version: 2
+application: simpletextws
+version: 1
 runtime: python
 api_version: 1
 
 handlers:
 
 - url: /
-  static_files: www/index_taskpaper.html
-  upload: www/index_taskpaper.html
+  static_files: www/index.html
+  upload: www/index.html
+
+- url: /light_security/?
+  static_files: www/light_security.html
+  upload: www/light_security.html
+
+- url: /avoid_lock_in/?
+  static_files: www/avoid_lock_in.html
+  upload: www/avoid_lock_in.html
+
+- url: /human_sized/?
+  static_files: www/human_sized.html
+  upload: www/human_sized.html
+
+- url: /supporting_applications/?
+  static_files: www/supporting_applications.html
+  upload: www/supporting_applications.html
 
 - url: /favicon.ico
-  static_files: www/favicon_taskpaper.ico
-  upload: www/favicon_taskpaper.ico
+  static_files: www/favicon.ico
+  upload: www/favicon.ico
 
 - url: /header.png
-  static_files: www/header_taskpaper.png
-  upload: www/header_taskpaper.png
+  static_files: www/header.png
+  upload: www/header.png
 
 - url: /admin
   script: documents.py

@@ -9,8 +9,8 @@ import documents_service
 parser = optparse.OptionParser(usage="usage: %prog [options]")
 parser.add_option("-u", "--user", action="store", dest="user", help="Google ID for Google Authentication.")
 parser.add_option("-p", "--password", action="store", dest="password", help="Password for Google Authentication.")
-parser.add_option("-c", "--service", action="store", dest="service", default="hogbaywriteroom", help="Service name for Google authentication.")
-parser.add_option("-s", "--server", action="store", dest="server", default="www.writeroom.ws", help="Documents service server URL.")
+parser.add_option("-c", "--service", action="store", dest="service", default="simpletextws", help="Service name for Google authentication.")
+parser.add_option("-s", "--server", action="store", dest="server", default="www.simpletext.ws", help="Documents service server URL.")
 options = parser.parse_args()[0]
 
 service_instance = documents_service.DocumentsService(options.service, options.server, options.user, options.password)

@@ -85,3 +85,12 @@ class DocumentsService(object):
 	"""
 	def GET_document_revision(self, document_id, revision_id):
 		return self.server.Send("/v1/documents/%s/revisions/%s" % (document_id, revision_id))
+		
+	""" Delete document revision.
+
+		Args:
+			document_id: Document's id
+			revision_id: Revision's id
+	"""
+	def DELETE_document_revision(self, document_id, revision_id):
+		return self.server.Send("/v1/documents/%s/revisions/%s" % (document_id, revision_id), method="DELETE")

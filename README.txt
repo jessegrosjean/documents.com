@@ -1,0 +1,1 @@
+If you decide to publicly self host this code please let me know and please rebrand it.
