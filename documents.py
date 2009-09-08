@@ -195,7 +195,7 @@ class Revision(db.Model):
 		return self.parent() != None
 
 	def is_named(self):
-		return len(self.revision_name) > 0
+		return self.revision_name != None and len(self.revision_name) > 0
 		
 	def uri(self):
 		return "/documents/%s/revision/%i" % (self.parent().id_string(), self.key().name()[2:])
@@ -496,9 +496,10 @@ class DocumentHandler(BaseHandler):
 			
 	@require_account
 	def delete(self, user_account, document_account_id, document_id):
-		version = self.request.get('version', None)
+		jsonDocument = simplejson.loads(self.request.body)
+		version = jsonDocument.get('version')
 		version = None if version == None else int(version)
-		
+				
 		if version == None:
 			self.error(400)
 			return
