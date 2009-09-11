@@ -496,8 +496,7 @@ class DocumentHandler(BaseHandler):
 			
 	@require_account
 	def delete(self, user_account, document_account_id, document_id):
-		jsonDocument = simplejson.loads(self.request.body)
-		version = jsonDocument.get('version')
+		version = self.request.get('version', None)
 		version = None if version == None else int(version)
 				
 		if version == None:
