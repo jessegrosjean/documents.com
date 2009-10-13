@@ -22,7 +22,7 @@ indexes:
   - name: user_ids
   - name: name
 
-# Unused in query history -- copied from input.
+# Used 2 times in query history.
 - kind: Document
   properties:
   - name: deleted

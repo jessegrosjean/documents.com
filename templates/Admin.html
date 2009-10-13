@@ -5,6 +5,11 @@
 	</head>
 
 	<body>
+		{% if found_account %}
+			<h1>Found Account</h1>
+			<p>{{ found_account.user.nickname }} {{ found_account.user.email }}</p>
+		{% endif %}
+				
 		<h1>Size Accounts</h1>
 		{% for account in size_accounts %}
 			<p>{{ account.user.nickname }} ( {{ account.documents_size }} )</p>
