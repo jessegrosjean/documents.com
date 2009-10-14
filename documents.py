@@ -318,6 +318,16 @@ def render(file, template_values={}):
 	else:
 		return False
 
+def validate_name(name):
+	if name:
+		name = re.split(r"(\r\n|\r|\n)", name, 1)[0]
+		l = len(name)
+		if l == 0:
+			name = 'Untitled'
+		elif l > 256:
+			name = name[0:256]
+	return name
+
 class BaseHandler(webapp.RequestHandler):
 	def head(self, *args):
 		self.get(*args)
@@ -370,9 +380,7 @@ class DocumentsHandler(BaseHandler):
 	def post(self, account):
 		try:
 			jsonDocument = simplejson.loads(self.request.body)
-			name = jsonDocument.get('name', None)
-			name = re.split(r"(\r\n|\r|\n)", name, 1)[0] if name != None else None
-			name = 'Untitled' if (name == None or len(name) == 0) else name
+			name = validate_name(jsonDocument.get('name', None))
 			tags = list_from_string(jsonDocument.get('tags'))
 			user_ids = list_with_user_id(list_from_string(jsonDocument.get('user_ids')), user_id_for_user(account.user))
 			content = jsonDocument.get('content', '')
@@ -482,9 +490,7 @@ class DocumentHandler(BaseHandler):
 			jsonDocument = simplejson.loads(self.request.body)
 			version = jsonDocument.get('version')
 			version = None if version == None else int(version)
-			name = jsonDocument.get('name', None)
-			name = re.split(r"(\r\n|\r|\n)", name, 1)[0] if name != None else None
-			name = 'Untitled' if (name != None and len(name) == 0) else name			
+			name = validate_name(jsonDocument.get('name', None))
 			patches = jsonDocument.get('patches', None)
 			tags_added = list_from_string(jsonDocument.get('tags_added'))
 			tags_removed = list_from_string(jsonDocument.get('tags_removed'))
