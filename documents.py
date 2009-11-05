@@ -619,7 +619,7 @@ def real_main():
 		('/v1/documents/([0-9]+)-([0-9]+)/revisions/?', DocumentRevisionsHandler),
 		('/v1/documents/([0-9]+)-([0-9]+)/revisions/(.+)/?', DocumentRevisionHandler),
 		('/v1/cron', DocumentsCronHandler),
-		], debug=True)
+		], debug=False)
 		
 	wsgiref.handlers.CGIHandler().run(application)
 
