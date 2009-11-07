@@ -73,8 +73,6 @@ class Account(db.Model):
 			if account == None:
 				account = Account(user=user, user_id=user_id_for_user(user))
 				account.put()
-				mail_notification = "[SimpleText.ws New User] %s %s" % (user.email(), user.nickname())
-				mail.send_mail(sender=admin, to=admin, subject=mail_notification, body=mail_notification)		
 			else:
 				account.user = user
 				account.user_id = user_id_for_user(user)
