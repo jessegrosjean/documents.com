@@ -290,7 +290,6 @@ def require_revision(f):
 		return f(*new_args, **kw)
 	return g
 
-
 def get_document_and_document_account(handler, user_account, document_account_id, document_id):
 	try:
 		document = Document.get(db.Key.from_path('Account', int(document_account_id), 'Document', int(document_id)))
@@ -303,7 +302,7 @@ def get_document_and_document_account(handler, user_account, document_account_id
 	if document == None or document.deleted or document_account == None:
 		handler.error(404)
 		return None, None
-	elif not (document.parent() == user_account or user_account.user.user_id() in document.user_ids):
+	elif not (document.parent() == user_account or user_account.user.user_id() in document.user_ids or users.is_current_user_admin()):
 		handler.error(401)
 		return None, None
 
