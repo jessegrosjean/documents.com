@@ -253,6 +253,9 @@ def require_account(f):
 		if user_account == None:
 			handler.error(401)
 			return stop_processing
+		
+		handler.response.headers['account_email'] = str(user_account.user.email())
+		handler.response.headers['account_id'] = str(user_id_for_user(user_account.user))
 		new_args = (handler, user_account) + a[1:]
 		return f(*new_args, **kw)
 	return g
