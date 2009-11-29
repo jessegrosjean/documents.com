@@ -256,6 +256,7 @@ def require_account(f):
 		
 		handler.response.headers['Account-Email'] = str(user_account.user.email())
 		handler.response.headers['Account-ID'] = str(user_id_for_user(user_account.user))
+		handler.response.headers['Server-Version'] = "2"
 		new_args = (handler, user_account) + a[1:]
 		return f(*new_args, **kw)
 	return g
