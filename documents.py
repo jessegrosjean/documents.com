@@ -2,6 +2,7 @@ import os
 import re
 import sys
 import zlib
+import hashlib
 import logging
 import datetime
 import operator
@@ -40,10 +41,14 @@ def list_from_string(string):
 		return []
 
 def user_id_for_user(user):
+	user_id = None
 	if is_development_server():
-		return user.email()
+		user_id = user.email()
 	else:
-		return user.user_id() # inconsistent on dev server
+		user_id = user.user_id() # inconsistent on dev server
+	if not user_id:
+		logging.error("failed to get user id for %s" % user)
+	return user_id
 
 def list_with_user_id(l, user_id):
 	if not user_id in l:
@@ -369,13 +374,20 @@ class DocumentsHandler(BaseHandler):
 		
 		if cached_response is None:
 			document_dicts = []
-			for document in account.get_documents(tag=self.request.get('tag', None)):
+			for document in account.get_documents(None):
 				document_dicts.append(document.to_index_dictionary())			
 			cached_response = simplejson.dumps(document_dicts)
 			memcache.set(cache_key, cached_response)
-
-		self.response.headers['Content-Type'] = 'application/json'
-		self.response.out.write(cached_response)
+		
+		requestEtag = self.request.headers.get('If-None-Match', None)
+		serverEtag = hashlib.md5(cached_response).hexdigest()
+		
+		if requestEtag == serverEtag:
+			self.response.set_status(304)
+		else:
+			self.response.headers['Etag'] = serverEtag
+			self.response.headers['Content-Type'] = 'application/json'
+			self.response.out.write(cached_response)
 	
 	@require_account
 	def post(self, account):
