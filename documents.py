@@ -381,11 +381,11 @@ class DocumentsHandler(BaseHandler):
 		
 		requestEtag = self.request.headers.get('If-None-Match', None)
 		serverEtag = hashlib.md5(cached_response).hexdigest()
+		self.response.headers['Etag'] = serverEtag
 		
 		if requestEtag == serverEtag:
 			self.response.set_status(304)
 		else:
-			self.response.headers['Etag'] = serverEtag
 			self.response.headers['Content-Type'] = 'application/json'
 			self.response.out.write(cached_response)
 	
@@ -474,6 +474,7 @@ def delta_update_document_txn(handler, user_account, document_account_id, docume
 	document_account.documents_cpu += (quota.get_request_cpu_usage() - start_quota)
 	db.put(puts)
 	document.clearMemcache(user_ids_removed)
+	handler.response.headers['Etag'] = str(document.version)
 
 	if version != document.version - 1 or always_return_content:
 		jsonResults = document.to_document_dictionary()
@@ -486,7 +487,14 @@ def delta_update_document_txn(handler, user_account, document_account_id, docume
 class DocumentHandler(BaseHandler):
 	@require_document
 	def get(self, user_account, document_account, document):
-		write_json_response(self.response, document.to_document_dictionary())
+		requestEtag = self.request.headers.get('If-None-Match', None)
+		serverEtag = str(document.version)
+		self.response.headers['Etag'] = serverEtag
+		
+		if requestEtag == serverEtag:
+			self.response.set_status(304)
+		else:
+			write_json_response(self.response, document.to_document_dictionary())
 	
 	def post(self, account_id, document_id):
 		method = self.request.headers.get('X-HTTP-Method-Override')
@@ -511,7 +519,7 @@ class DocumentHandler(BaseHandler):
 			user_ids_removed = list_from_string(jsonDocument.get('user_ids_removed'))
 
 			results = db.run_in_transaction(delta_update_document_txn, self, user_account, document_account_id, document_id, version, name, patches, tags_added, tags_removed, user_ids_added, user_ids_removed)
-			
+
 			if results:
 				write_json_response(self.response, results)
 		except db.TransactionFailedError:
