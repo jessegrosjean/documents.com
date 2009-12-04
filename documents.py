@@ -346,12 +346,18 @@ class AdminHandler(BaseHandler):
 	def get(self):
 		if users.is_current_user_admin():
 			found_account_id = self.request.get("account_id", None)
-			found_account = None
-			
+			found_account1 = None
+
 			if found_account_id:
-				found_account = Account.get(db.Key.from_path('Account', int(found_account_id)))				
+				found_account1 = Account.get(db.Key.from_path('Account', int(found_account_id)))				
+
+			found_account_email = self.request.get("account_email", None)
+			found_account2 = None
+
+			if found_account_id:
+				found_account2 = Account.get_account_for_user(users.User(found_account_email))				
 				
-			self.response.out.write(render("Admin.html", { 'found_account' : found_account, 'title' : "Admin", 'size_accounts' : Account.gql("ORDER BY documents_size DESC").fetch(100), 'cpu_accounts' : Account.gql("ORDER BY documents_cpu DESC").fetch(100) } ))
+			self.response.out.write(render("Admin.html", { 'found_account1' : found_account1, 'found_account2' : found_account2, 'title' : "Admin", 'size_accounts' : Account.gql("ORDER BY documents_size DESC").fetch(100), 'cpu_accounts' : Account.gql("ORDER BY documents_cpu DESC").fetch(100) } ))
 		else:
 			self.redirect(users.create_login_url("/admin"), False)
 
@@ -616,7 +622,7 @@ class DocumentsCronHandler(BaseHandler):
 			to_delete = []
 			revisions = db.GqlQuery("SELECT __key__ FROM Revision WHERE ANCESTOR IS :document", document=document).fetch(10)
 			to_delete.extend(revisions)
-			if (len(revisions) < 10):
+			if (len(revisions) < 5):
 				account = document.parent()
 				account.documents_size -= document.size
 				to_delete.append(document)
@@ -626,7 +632,7 @@ class DocumentsCronHandler(BaseHandler):
 				db.put(account)
 			db.delete(to_delete)
 		
-		for each in Document.gql('WHERE deleted = True').fetch(10):
+		for each in Document.gql('WHERE deleted = True').fetch(5):
 			db.run_in_transaction(delete_document_txn, each)		
 
 def real_main():

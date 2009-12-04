@@ -5,9 +5,14 @@
 	</head>
 
 	<body>
-		{% if found_account %}
+		{% if found_account1 %}
 			<h1>Found Account</h1>
-			<p>{{ found_account.user.nickname }} {{ found_account.user.email }}</p>
+			<p>{{ found_account1.user.nickname }} {{ found_account1.user.email }} {{ found_account1.user.user_id }}</p>
+		{% endif %}
+
+		{% if found_account2 %}
+			<h1>Found Account</h1>
+			<p>{{ found_account2.user.nickname }} {{ found_account2.user.email }} {{ found_account2.user.user_id }}</p>
 		{% endif %}
 				
 		<h1>Size Accounts</h1>
