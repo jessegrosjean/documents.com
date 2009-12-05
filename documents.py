@@ -223,8 +223,6 @@ documents_query_with_tag = Document.gql("WHERE user_ids = :1 AND deleted = :2 AN
 body_query = Body.gql("WHERE ANCESTOR IS :1", None)
 revisions_with_unresolved_conflicts_query = Revision.gql("WHERE account = :1 AND conflicts_resolved = :2 ORDER BY __key__ DESC", None, False)
 revisions_keys_query = db.GqlQuery("SELECT __key__ FROM Revision WHERE ANCESTOR IS :1 ORDER BY __key__ DESC", None)
-#prunable_document_keys_query = db.GqlQuery("SELECT __key__ FROM Document WHERE unamed_revisions_count > 10 ORDER BY unamed_revisions_count")
-#prunable_revision_keys_query = db.GqlQuery("SELECT __key__ FROM Revision WHERE ANCESTOR IS :1 AND  ORDER BY __key__ DESC", None)
 
 #
 # Controllers
@@ -239,64 +237,66 @@ def stop_processing(*a, **kw):
 def write_json_response(response, json):
 	response.headers['Content-Type'] = 'application/json'
 	response.out.write(simplejson.dumps(json))
-
-def write_deadline_exceeded_response(response, document, account_email):
-	logging.error("DeadlineExceededError %s %s" % (document, account_email))
-	response.response.clear()
-	response.response.set_status(500)
-	response.response.out.write("Document %s sync could not be completed in time. If this problem persists the document may be to big. Please delete the document and divide it into two smaller documents." % document)
 	
 def require_account(f):	
-	def g(*a, **kw):
-		handler = a[0]
-
-		if is_development_server():
-			user_account = Account.get_account_for_user(users.User("test@example.com"))
-		else:
-			user_account = Account.get_account_for_user(users.get_current_user())
+	def g(*args, **kwargs):
+		try:
+			handler = args[0]
 			
-		if user_account == None:
-			handler.error(401)
-			return stop_processing
+			if is_development_server():
+				user_account = Account.get_account_for_user(users.User("test@example.com"))
+			else:
+				user_account = Account.get_account_for_user(users.get_current_user())
+			
+			if user_account == None:
+				handler.error(401)
+				return stop_processing
 		
-		handler.response.headers['Account-Email'] = str(user_account.user.email())
-		handler.response.headers['Account-ID'] = str(user_id_for_user(user_account.user))
-		handler.response.headers['Server-Version'] = "2"
-		new_args = (handler, user_account) + a[1:]
-		return f(*new_args, **kw)
+			handler.response.headers['Account-Email'] = str(user_account.user.email())
+			handler.response.headers['Account-ID'] = str(user_id_for_user(user_account.user))
+			handler.response.headers['Server-Version'] = "2"
+			new_args = (handler, user_account) + args[1:]
+		
+			return f(*new_args, **kwargs)
+		except (db.TransactionFailedError, runtime.DeadlineExceededError):
+			logging.error("Service Unavailable %s %s" % (handler.request.url, sys.exc_info()[:2]))
+			handler.response.clear()
+			handler.response.set_status(503)
+			handler.response.out.write("Please try again.")
+			return stop_processing
 	return g
 
 def require_document(f):
 	@require_account
-	def g(*a, **kw):
-		handler = a[0]
-		user_account = a[1]
-		document_account_id = a[2]
-		document_id = a[3]
+	def g(*args, **kwargs):
+		handler = args[0]
+		user_account = args[1]
+		document_account_id = args[2]
+		document_id = args[3]
 		document, document_account = get_document_and_document_account(handler, user_account, document_account_id, document_id)
 		if document == None or document.deleted or document_account == None:
 			return stop_processing 
 			
-		new_args = (handler, user_account, document_account, document) + a[4:]
-		return f(*new_args, **kw)
+		new_args = (handler, user_account, document_account, document) + args[4:]
+		return f(*new_args, **kwargs)
 	return g
 
 def require_revision(f):
 	@require_document
-	def g(*a, **kw):
-		handler = a[0]
-		user_account = a[1]
-		document_account = a[2]
-		document = a[3]
-		revision_id = 'k:%s' % a[4]
+	def g(*args, **kwargs):
+		handler = args[0]
+		user_account = args[1]
+		document_account = args[2]
+		document = args[3]
+		revision_id = 'k:%s' % args[4]
 		revision = Revision.get_by_key_name(revision_id, document)
 		
 		if not revision:
 			handler.error(401)
 			return stop_processing 
 
-		new_args = (handler, user_account, document_account, document, revision) + a[5:]
-		return f(*new_args, **kw)
+		new_args = (handler, user_account, document_account, document, revision) + args[5:]
+		return f(*new_args, **kwargs)
 	return g
 
 def get_document_and_document_account(handler, user_account, document_account_id, document_id):
@@ -377,50 +377,43 @@ class DocumentsHandler(BaseHandler):
 	def get(self, account):
 		cache_key = user_id_for_user(account.user)
 		cached_response = memcache.get(cache_key)
-		
+
 		if cached_response is None:
 			document_dicts = []
 			for document in account.get_documents(None):
 				document_dicts.append(document.to_index_dictionary())			
 			cached_response = simplejson.dumps(document_dicts)
 			memcache.set(cache_key, cached_response)
-		
+
 		requestEtag = self.request.headers.get('If-None-Match', None)
 		serverEtag = hashlib.md5(cached_response).hexdigest()
 		self.response.headers['Etag'] = serverEtag
-		
+
 		if requestEtag == serverEtag:
 			self.response.set_status(304)
 		else:
 			self.response.headers['Content-Type'] = 'application/json'
 			self.response.out.write(cached_response)
-	
+
 	@require_account
 	def post(self, account):
-		try:
-			jsonDocument = simplejson.loads(self.request.body)
-			name = validate_name(jsonDocument.get('name', None))
-			tags = list_from_string(jsonDocument.get('tags'))
-			user_ids = list_with_user_id(list_from_string(jsonDocument.get('user_ids')), user_id_for_user(account.user))
-			content = jsonDocument.get('content', '')
-			content = re.sub(r"(\r\n|\r)", "\n", content)
+		jsonDocument = simplejson.loads(self.request.body)
+		name = validate_name(jsonDocument.get('name', None))
+		tags = list_from_string(jsonDocument.get('tags'))
+		user_ids = list_with_user_id(list_from_string(jsonDocument.get('user_ids')), user_id_for_user(account.user))
+		content = jsonDocument.get('content', '')
+		content = re.sub(r"(\r\n|\r)", "\n", content)
 
-			def create_document_txn():
-				document = Document(parent=account, version=0, name=name, tags=tags, user_ids=user_ids, size=len(content))
-				document.put()
-				revision = document.create_revision(account, account, content, sys.maxint)
-				body = Body(parent=document, content=content, content_size=len(content))
-				db.put([body, revision, account])
-				return document
-		
-			document = db.run_in_transaction(create_document_txn)
-			document.clearMemcache()
-		except db.TransactionFailedError:
-			self.error(503)
-			return
-		except runtime.DeadlineExceededError:
-			write_deadline_exceeded_response(self.response, name, account.user.email())
-			return
+		def create_document_txn():
+			document = Document(parent=account, version=0, name=name, tags=tags, user_ids=user_ids, size=len(content))
+			document.put()
+			revision = document.create_revision(account, account, content, sys.maxint)
+			body = Body(parent=document, content=content, content_size=len(content))
+			db.put([body, revision, account])
+			return document
+	
+		document = db.run_in_transaction(create_document_txn)
+		document.clearMemcache()
 		
 		self.response.set_status(201)
 		self.response.headers.add_header("Location", document.uri())
@@ -428,7 +421,7 @@ class DocumentsHandler(BaseHandler):
 		
 def delta_update_document_txn(handler, user_account, document_account_id, document_id, version, name, patches, tags_added, tags_removed, user_ids_added, user_ids_removed, revision_name=None, always_return_content=False):
 	start_quota = quota.get_request_cpu_usage()
-	
+		
 	document, document_account = get_document_and_document_account(handler, user_account, document_account_id, document_id)
 
 	if document == None or document_account == None:
@@ -513,25 +506,18 @@ class DocumentHandler(BaseHandler):
 
 	@require_account
 	def put(self, user_account, document_account_id, document_id):
-		try:
-			jsonDocument = simplejson.loads(self.request.body)
-			version = jsonDocument.get('version')
-			version = None if version == None else int(version)
-			name = validate_name(jsonDocument.get('name', None))
-			patches = jsonDocument.get('patches', None)
-			tags_added = list_from_string(jsonDocument.get('tags_added'))
-			tags_removed = list_from_string(jsonDocument.get('tags_removed'))
-			user_ids_added = list_from_string(jsonDocument.get('user_ids_added'))
-			user_ids_removed = list_from_string(jsonDocument.get('user_ids_removed'))
-
-			results = db.run_in_transaction(delta_update_document_txn, self, user_account, document_account_id, document_id, version, name, patches, tags_added, tags_removed, user_ids_added, user_ids_removed)
-
-			if results:
-				write_json_response(self.response, results)
-		except db.TransactionFailedError:
-			self.error(503)
-		except runtime.DeadlineExceededError:
-			write_deadline_exceeded_response(self.response, document.name, user_account.user.email())
+		jsonDocument = simplejson.loads(self.request.body)
+		version = jsonDocument.get('version')
+		version = None if version == None else int(version)
+		name = validate_name(jsonDocument.get('name', None))
+		patches = jsonDocument.get('patches', None)
+		tags_added = list_from_string(jsonDocument.get('tags_added'))
+		tags_removed = list_from_string(jsonDocument.get('tags_removed'))
+		user_ids_added = list_from_string(jsonDocument.get('user_ids_added'))
+		user_ids_removed = list_from_string(jsonDocument.get('user_ids_removed'))
+		results = db.run_in_transaction(delta_update_document_txn, self, user_account, document_account_id, document_id, version, name, patches, tags_added, tags_removed, user_ids_added, user_ids_removed)
+		if results:
+			write_json_response(self.response, results)
 			
 	@require_account
 	def delete(self, user_account, document_account_id, document_id):
@@ -559,8 +545,6 @@ class DocumentHandler(BaseHandler):
 			document.clearMemcache()
 		except ValueError:
 			pass
-		except db.TransactionFailedError:
-			self.error(503)
 
 class DocumentRevisionsHandler(BaseHandler):
 	@require_document
@@ -592,7 +576,8 @@ class DocumentRevisionHandler(BaseHandler):
 
 	@require_revision
 	def delete(self, user_account, document_account, document, revision):
-		document.delete(revision)
+		document.delete_revision(revision, document_account) # BAD, untested code, need to rethink
+		
 		def delete_revision_txn():
 			document.deleted = True			
 			db.put([document, document_account])
@@ -603,8 +588,6 @@ class DocumentRevisionHandler(BaseHandler):
 			document.clearMemcache()
 		except ValueError:
 			pass
-		except db.TransactionFailedError:
-			self.error(503)
 
 class ConflictsHandler(BaseHandler):
 	@require_account
