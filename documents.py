@@ -259,10 +259,11 @@ def require_account(f):
 		
 			return f(*new_args, **kwargs)
 		except (db.TransactionFailedError, runtime.DeadlineExceededError):
-			logging.error("Service Unavailable %s %s" % (handler.request.url, sys.exc_info()[:2]))
+			handler.response.headers['Retry-After'] = "1" # App engine should handle it, don't worry about backoff.
 			handler.response.clear()
 			handler.response.set_status(503)
 			handler.response.out.write("Please try again.")
+			logging.error("Service Unavailable %s %s" % (handler.request.url, sys.exc_info()[:2]))
 			return stop_processing
 	return g
 

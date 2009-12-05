@@ -28,6 +28,10 @@ handlers:
 - url: /favicon.ico
   static_files: www/favicon.ico
   upload: www/favicon.ico
+ 
+- url: /robots.txt
+  static_files: www/robots.txt
+  upload: www/robots.txt
 
 - url: /header.png
   static_files: www/header.png
