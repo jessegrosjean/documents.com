@@ -5,7 +5,6 @@ import zlib
 import hashlib
 import logging
 import datetime
-import operator
 import wsgiref.handlers
 
 from django.utils import simplejson
@@ -13,16 +12,24 @@ from diff_match_patch import diff_match_patch
 
 from google.appengine import runtime
 from google.appengine.ext import db
-from google.appengine.api import mail
 from google.appengine.api import users
 from google.appengine.ext import webapp
 from google.appengine.api import quota
 from google.appengine.api import memcache
+from google.appengine.ext.webapp import util
 from google.appengine.ext.webapp import template
 from google.appengine.api.datastore_types import Blob 
 
 admin = "jesse@hogbaysoftware.com"
 dmp = diff_match_patch()
+
+#
+# Requirements for future datastore release
+# Get document, account, and document body in single, so extra query to fetch body is no longer needed.
+# Move owner field to document
+# Remoe documents from account entity group, they should stand on own.
+# Possible to get rid of account object? That would save query on every load.
+#
 
 #
 # Models
@@ -142,7 +149,7 @@ class Document(db.Model):
 		return { 'id': self.id_string(), 'version': self.version, 'name': self.name }
 
 	def to_document_dictionary(self):
-		return { 'owner' : self.parent().user.email(), 'id': self.id_string(), 'name': self.name, 'version': self.version, 'created': str(self.created), 'modified': str(self.modified), 'tags' : self.tags, 'user_ids' : self.user_ids, 'content': self.get_body().content }
+		return { 'id': self.id_string(), 'name': self.name, 'version': self.version, 'created': str(self.created), 'modified': str(self.modified), 'tags' : self.tags, 'user_ids' : self.user_ids, 'content': self.get_body().content }
 		
 	def create_revision(self, user_account, document_account, content, levenshtein, conflicts=None, revision_name=None):
 		key_date = datetime.datetime.utcnow()
@@ -201,10 +208,10 @@ class Revision(db.Model):
 		return self.revision_name != None and len(self.revision_name) > 0
 		
 	def uri(self):
-		return "/documents/%s/revision/%i" % (self.parent().id_string(), self.key().name()[2:])
+		return "/documents/%s/revision/%i" % (self.parent_key().id(), self.key().name()[2:])
 		
 	def to_revision_dictionary(self):
-		return { 'id' : self.key().name()[2:], 'document_id' : self.parent().id_string(), 'name': self.name, 'tags' : self.tags, 'user_ids' : self.user_ids, 'content': self.content, 'conflicts' : self.conflicts, 'conflicts_resolved' : self.conflicts_resolved }
+		return { 'id' : self.key().name()[2:], 'document_id' : self.parent_key().id(), 'name': self.name, 'tags' : self.tags, 'user_ids' : self.user_ids, 'content': self.content, 'conflicts' : self.conflicts, 'conflicts_resolved' : self.conflicts_resolved }
 		
 	def size(self):
 		if self.conflicts:
@@ -302,9 +309,10 @@ def require_revision(f):
 
 def get_document_and_document_account(handler, user_account, document_account_id, document_id):
 	try:
-		document = Document.get(db.Key.from_path('Account', int(document_account_id), 'Document', int(document_id)))
-		if document:
-			document_account = document.parent()
+		document_account, document = db.get([db.Key.from_path('Account', int(document_account_id)), db.Key.from_path('Account', int(document_account_id), 'Document', int(document_id))])
+		#document = Document.get(db.Key.from_path('Account', int(document_account_id), 'Document', int(document_id)))
+		#if document:
+		#	document_account = document.parent()
 	except db.BadKeyError:
 		document = None
 		document_account = None
@@ -312,7 +320,8 @@ def get_document_and_document_account(handler, user_account, document_account_id
 	if document == None or document.deleted or document_account == None:
 		handler.error(404)
 		return None, None
-	elif not (document.parent() == user_account or user_account.user.user_id() in document.user_ids or users.is_current_user_admin()):
+	elif not (document_account == user_account or user_account.user.user_id() in document.user_ids or users.is_current_user_admin()):
+		#elif not (document.parent() == user_account or user_account.user.user_id() in document.user_ids or users.is_current_user_admin()):
 		handler.error(401)
 		return None, None
 
@@ -632,7 +641,7 @@ def real_main():
 		('/v1/cron', DocumentsCronHandler),
 		], debug=False)
 		
-	wsgiref.handlers.CGIHandler().run(application)
+	util.run_wsgi_app(application)
 
 def profile_main():
 	import cProfile, pstats, StringIO
