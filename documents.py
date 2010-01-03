@@ -355,19 +355,19 @@ class BaseHandler(webapp.RequestHandler):
 class AdminHandler(BaseHandler):
 	def get(self):
 		if users.is_current_user_admin():
-			found_account_id = self.request.get("account_id", None)
-			found_account1 = None
+			account_id = self.request.get("account_id", None)
+			account_by_id = None
 
-			if found_account_id:
-				found_account1 = Account.get(db.Key.from_path('Account', int(found_account_id)))				
+			if account_id:
+				account_by_id = Account.get(db.Key.from_path('Account', int(account_id)))				
 
-			found_account_email = self.request.get("account_email", None)
-			found_account2 = None
+			account_email = self.request.get("account_email", None)
+			account_by_email = None
 
-			if found_account_id:
-				found_account2 = Account.get_account_for_user(users.User(found_account_email))				
+			if account_email:
+				account_by_email = Account.get_account_for_user(users.User(account_email))				
 				
-			self.response.out.write(render("Admin.html", { 'found_account1' : found_account1, 'found_account2' : found_account2, 'title' : "Admin", 'size_accounts' : Account.gql("ORDER BY documents_size DESC").fetch(100), 'cpu_accounts' : Account.gql("ORDER BY documents_cpu DESC").fetch(100) } ))
+			self.response.out.write(render("Admin.html", { 'account_by_id' : account_by_id, 'account_by_email' : account_by_email, 'title' : "Admin", 'size_accounts' : Account.gql("ORDER BY documents_size DESC").fetch(100), 'cpu_accounts' : Account.gql("ORDER BY documents_cpu DESC").fetch(100) } ))
 		else:
 			self.redirect(users.create_login_url("/admin"), False)
 
