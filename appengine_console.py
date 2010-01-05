@@ -24,4 +24,9 @@ else:
 
 remote_api_stub.ConfigureRemoteDatastore(app_id, '/remote_api', auth_func, host)
 
+from google.appengine.api import users
+from google.appengine.api import memcache
+
+import documents
+
 code.interact('App Engine interactive console for %s' % (app_id,), None, locals())

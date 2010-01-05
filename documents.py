@@ -26,6 +26,7 @@ dmp = diff_match_patch()
 #
 # Requirements for future datastore release
 # Get document, account, and document body in single, so extra query to fetch body is no longer needed.
+# accounts should be keyed by user_id, no query needed.
 # Move owner field to document
 # Remoe documents from account entity group, they should stand on own.
 # Possible to get rid of account object? That would save query on every load.
@@ -47,16 +48,6 @@ def list_from_string(string):
 	else:
 		return []
 
-def user_id_for_user(user):
-	user_id = None
-	if is_development_server():
-		user_id = user.email()
-	else:
-		user_id = user.user_id() # inconsistent on dev server
-	if not user_id:
-		logging.error("failed to get user id for %s" % user)
-	return user_id
-
 def list_with_user_id(l, user_id):
 	if not user_id in l:
 		l.append(user_id)
@@ -73,21 +64,29 @@ class Account(db.Model):
 	@classmethod
 	def get_account_for_user(cls, user):
 		if user:
-			account_by_user_id_query.bind(user_id_for_user(user))
-			account = account_by_user_id_query.get()
+			account_by_user_id_query.bind(user.user_id())
+			accounts = account_by_user_id_query.fetch(2)
+			account = None
+
+			if (len(accounts) > 1):
+				logging.error("Found multiple accounts with id %s", user.user_id())
+				account = accounts[0]
+			elif len(accounts) == 1:
+				account = accounts[0]
 
 			if account:
-				return account
+				if account.user == user: # else user email changed, so update account
+					return account
 			else:
 				account = account_by_user_query.bind(user)
 				account = account_by_user_query.get()
 				
 			if account == None:
-				account = Account(user=user, user_id=user_id_for_user(user))
+				account = Account(user=user, user_id=user.user_id())
 				account.put()
 			else:
 				account.user = user
-				account.user_id = user_id_for_user(user)
+				account.user_id = user.user_id()
 				account.put()
 				
 			return account
@@ -249,18 +248,14 @@ def require_account(f):
 	def g(*args, **kwargs):
 		try:
 			handler = args[0]
-			
-			if is_development_server():
-				user_account = Account.get_account_for_user(users.User("test@example.com"))
-			else:
-				user_account = Account.get_account_for_user(users.get_current_user())
-			
+		
+			user_account = Account.get_account_for_user(users.get_current_user())
 			if user_account == None:
 				handler.error(401)
 				return stop_processing
 		
 			handler.response.headers['Account-Email'] = str(user_account.user.email())
-			handler.response.headers['Account-ID'] = str(user_id_for_user(user_account.user))
+			handler.response.headers['Account-ID'] = str(user_account.user_id)
 			handler.response.headers['Server-Version'] = "2"
 			new_args = (handler, user_account) + args[1:]
 		
@@ -320,7 +315,7 @@ def get_document_and_document_account(handler, user_account, document_account_id
 	if document == None or document.deleted or document_account == None:
 		handler.error(404)
 		return None, None
-	elif not (document_account == user_account or user_account.user.user_id() in document.user_ids or users.is_current_user_admin()):
+	elif not (document_account == user_account or user_account.user_id in document.user_ids or users.is_current_user_admin()):
 		#elif not (document.parent() == user_account or user_account.user.user_id() in document.user_ids or users.is_current_user_admin()):
 		handler.error(401)
 		return None, None
@@ -365,7 +360,7 @@ class AdminHandler(BaseHandler):
 			account_by_email = None
 
 			if account_email:
-				account_by_email = Account.get_account_for_user(users.User(account_email))				
+				account_by_email = Account.get_account_for_user(users.User(account_email))			
 				
 			self.response.out.write(render("Admin.html", { 'account_by_id' : account_by_id, 'account_by_email' : account_by_email, 'title' : "Admin", 'size_accounts' : Account.gql("ORDER BY documents_size DESC").fetch(100), 'cpu_accounts' : Account.gql("ORDER BY documents_cpu DESC").fetch(100) } ))
 		else:
@@ -385,7 +380,7 @@ class ClientHandler(BaseHandler):
 class DocumentsHandler(BaseHandler):
 	@require_account
 	def get(self, account):
-		cache_key = user_id_for_user(account.user)
+		cache_key = account.user_id
 		cached_response = memcache.get(cache_key)
 
 		if cached_response is None:
@@ -410,7 +405,7 @@ class DocumentsHandler(BaseHandler):
 		jsonDocument = simplejson.loads(self.request.body)
 		name = validate_name(jsonDocument.get('name', None))
 		tags = list_from_string(jsonDocument.get('tags'))
-		user_ids = list_with_user_id(list_from_string(jsonDocument.get('user_ids')), user_id_for_user(account.user))
+		user_ids = list_with_user_id(list_from_string(jsonDocument.get('user_ids')), account.user_id)
 		content = jsonDocument.get('content', '')
 		content = re.sub(r"(\r\n|\r)", "\n", content)
 
@@ -453,7 +448,7 @@ def delta_update_document_txn(handler, user_account, document_account_id, docume
 	if len(user_ids_added) > 0: document.user_ids = list_union(document.user_ids, user_ids_added)
 	if len(user_ids_removed) > 0: document.user_ids = list_minus(document.user_ids, user_ids_removed)
 
-	document_user_id = document_account.user.user_id()
+	document_user_id = document_account.user_id
 	if not document_user_id in document.user_ids:
 		document.user_ids.append(document_user_id)
 	
@@ -625,8 +620,17 @@ class DocumentsCronHandler(BaseHandler):
 				db.put(account)
 			db.delete(to_delete)
 		
-		for each in Document.gql('WHERE deleted = True').fetch(5):
-			db.run_in_transaction(delete_document_txn, each)		
+		#for each in Document.gql('WHERE deleted = True').fetch(5):
+		#	db.run_in_transaction(delete_document_txn, each)		
+
+class PrintUserHandler(BaseHandler):
+	def get(self):
+		user = users.get_current_user()
+		if user:
+			self.response.headers['Content-Type'] = 'text/plain'
+			self.response.out.write('Hello, ' + user.nickname() + ' id: ' + user.user_id())
+		else:
+			self.redirect(users.create_login_url(self.request.uri))
 
 def real_main():
 	application = webapp.WSGIApplication([
@@ -639,6 +643,7 @@ def real_main():
 		('/v1/documents/([0-9]+)-([0-9]+)/revisions/?', DocumentRevisionsHandler),
 		('/v1/documents/([0-9]+)-([0-9]+)/revisions/(.+)/?', DocumentRevisionHandler),
 		('/v1/cron', DocumentsCronHandler),
+		('/v1/printuser/?', PrintUserHandler),
 		], debug=False)
 		
 	util.run_wsgi_app(application)
