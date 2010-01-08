@@ -305,9 +305,6 @@ def require_revision(f):
 def get_document_and_document_account(handler, user_account, document_account_id, document_id):
 	try:
 		document_account, document = db.get([db.Key.from_path('Account', int(document_account_id)), db.Key.from_path('Account', int(document_account_id), 'Document', int(document_id))])
-		#document = Document.get(db.Key.from_path('Account', int(document_account_id), 'Document', int(document_id)))
-		#if document:
-		#	document_account = document.parent()
 	except db.BadKeyError:
 		document = None
 		document_account = None
@@ -316,7 +313,6 @@ def get_document_and_document_account(handler, user_account, document_account_id
 		handler.error(404)
 		return None, None
 	elif not (document_account == user_account or user_account.user_id in document.user_ids or users.is_current_user_admin()):
-		#elif not (document.parent() == user_account or user_account.user.user_id() in document.user_ids or users.is_current_user_admin()):
 		handler.error(401)
 		return None, None
 
@@ -619,9 +615,9 @@ class DocumentsCronHandler(BaseHandler):
 					to_delete.append(body)
 				db.put(account)
 			db.delete(to_delete)
-		
-		#for each in Document.gql('WHERE deleted = True').fetch(5):
-		#	db.run_in_transaction(delete_document_txn, each)		
+
+		for each in Document.gql('WHERE deleted = True').fetch(5):
+			db.run_in_transaction(delete_document_txn, each)		
 
 class PrintUserHandler(BaseHandler):
 	def get(self):
