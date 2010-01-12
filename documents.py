@@ -57,8 +57,6 @@ class Account(db.Model):
 	user = db.UserProperty(required=True)
 	user_id = db.StringProperty()
 	model_version = db.IntegerProperty(default=0)
-	documents_size = db.IntegerProperty(required=True, default=0)
-	documents_cpu = db.IntegerProperty(default=0)
 	last_paid = db.DateTimeProperty()
 
 	@classmethod
@@ -170,16 +168,13 @@ class Document(db.Model):
 			
 		self.size += revision.size()
 		self.last_revision = key_date
-		document_account.documents_size += revision.size()
 
 		return revision
 		
 	def delete_revision(self, revision, document_account):
 		if not revision.is_named():
 			self.unamed_revisions_count -= 1
-		self.size -= revision.size()
-		document_account.documents_size -= revision.size()
-			
+		self.size -= revision.size()			
 	
 	def clearMemcache(self, clear_ids=[]):
 		clear_ids.extend(self.user_ids)
@@ -207,10 +202,10 @@ class Revision(db.Model):
 		return self.revision_name != None and len(self.revision_name) > 0
 		
 	def uri(self):
-		return "/documents/%s/revision/%i" % (self.parent_key().id(), self.key().name()[2:])
+		return "/documents/%s/revision/%i" % (self.parent().id_string(), self.key().name()[2:])
 		
 	def to_revision_dictionary(self):
-		return { 'id' : self.key().name()[2:], 'document_id' : self.parent_key().id(), 'name': self.name, 'tags' : self.tags, 'user_ids' : self.user_ids, 'content': self.content, 'conflicts' : self.conflicts, 'conflicts_resolved' : self.conflicts_resolved }
+		return { 'id' : self.key().name()[2:], 'document_id' : self.parent().id_string(), 'name': self.name, 'tags' : self.tags, 'user_ids' : self.user_ids, 'content': self.content, 'conflicts' : self.conflicts, 'conflicts_resolved' : self.conflicts_resolved }
 		
 	def size(self):
 		if self.conflicts:
@@ -421,8 +416,6 @@ class DocumentsHandler(BaseHandler):
 		write_json_response(self.response, document.to_document_dictionary())
 		
 def delta_update_document_txn(handler, user_account, document_account_id, document_id, version, name, patches, tags_added, tags_removed, user_ids_added, user_ids_removed, revision_name=None, always_return_content=False):
-	start_quota = quota.get_request_cpu_usage()
-		
 	document, document_account = get_document_and_document_account(handler, user_account, document_account_id, document_id)
 
 	if document == None or document_account == None:
@@ -471,7 +464,6 @@ def delta_update_document_txn(handler, user_account, document_account_id, docume
 	revision = document.create_revision(user_account, document_account, document.get_body().content, levenshtein, conflicts, revision_name)
 	puts.append(revision)
 
-	document_account.documents_cpu += (quota.get_request_cpu_usage() - start_quota)
 	db.put(puts)
 	document.clearMemcache(user_ids_removed)
 	handler.response.headers['Etag'] = str(document.version)
@@ -607,13 +599,13 @@ class DocumentsCronHandler(BaseHandler):
 			revisions = db.GqlQuery("SELECT __key__ FROM Revision WHERE ANCESTOR IS :document", document=document).fetch(10)
 			to_delete.extend(revisions)
 			if (len(revisions) < 5):
-				account = document.parent()
-				account.documents_size -= document.size
 				to_delete.append(document)
+				account = document.parent()
+				if account:
+					db.put(account)
 				body = document.get_body()
 				if body:
 					to_delete.append(body)
-				db.put(account)
 			db.delete(to_delete)
 
 		for each in Document.gql('WHERE deleted = True').fetch(5):
