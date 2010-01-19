@@ -23,10 +23,15 @@ from google.appengine.api.datastore_types import Blob
 admin = "jesse@hogbaysoftware.com"
 dmp = diff_match_patch()
 
+#def baseN(num,b):
+#	return ((num == 0) and  "0" ) or ( baseN(num // b, b).lstrip("0") + "0123456789abcdefghijklmnopqrstuvwxyz"[num % b])
+#baseN(1023439232, 32) = 
+#string.atoi('ug0sc0', 32) = 1023439232
 #
 # Requirements for future datastore release
 # Get document, account, and document body in single, so extra query to fetch body is no longer needed.
 # accounts should be keyed by user_id, no query needed.
+# avoid loading accounts, don't track cpu time, storage for account can be computed later.
 # Move owner field to document
 # Remoe documents from account entity group, they should stand on own.
 # Possible to get rid of account object? That would save query on every load.
@@ -42,13 +47,9 @@ def list_union(l1, l2):
 def list_minus(l1, l2):
 	return filter(lambda x: x not in l2, l1)
 
-def list_from_string(string):
-	if string:
-		return string.split()
-	else:
-		return []
-
 def list_with_user_id(l, user_id):
+	if not l:
+		l = []
 	if not user_id in l:
 		l.append(user_id)
 	return l
@@ -395,8 +396,8 @@ class DocumentsHandler(BaseHandler):
 	def post(self, account):
 		jsonDocument = simplejson.loads(self.request.body)
 		name = validate_name(jsonDocument.get('name', None))
-		tags = list_from_string(jsonDocument.get('tags'))
-		user_ids = list_with_user_id(list_from_string(jsonDocument.get('user_ids')), account.user_id)
+		tags = jsonDocument.get('tags', [])
+		user_ids = list_with_user_id(jsonDocument.get('user_ids'), account.user_id)
 		content = jsonDocument.get('content', '')
 		content = re.sub(r"(\r\n|\r)", "\n", content)
 
@@ -504,10 +505,14 @@ class DocumentHandler(BaseHandler):
 		version = None if version == None else int(version)
 		name = validate_name(jsonDocument.get('name', None))
 		patches = jsonDocument.get('patches', None)
-		tags_added = list_from_string(jsonDocument.get('tags_added'))
-		tags_removed = list_from_string(jsonDocument.get('tags_removed'))
-		user_ids_added = list_from_string(jsonDocument.get('user_ids_added'))
-		user_ids_removed = list_from_string(jsonDocument.get('user_ids_removed'))
+		tags_added = jsonDocument.get('tags_added')
+		tags_added = [] if tags_added == None else tags_added
+		tags_removed = jsonDocument.get('tags_removed')
+		tags_removed = [] if tags_removed == None else tags_removed
+		user_ids_added = jsonDocument.get('user_ids_added')
+		user_ids_added = [] if user_ids_added == None else user_ids_added
+		user_ids_removed = jsonDocument.get('user_ids_removed')
+		user_ids_removed = [] if user_ids_removed == None else user_ids_removed
 		results = db.run_in_transaction(delta_update_document_txn, self, user_account, document_account_id, document_id, version, name, patches, tags_added, tags_removed, user_ids_added, user_ids_removed)
 		if results:
 			write_json_response(self.response, results)
