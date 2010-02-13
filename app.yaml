@@ -1,5 +1,5 @@
 application: simpletextws
-version: 6
+version: 7
 runtime: python
 api_version: 1
 
@@ -57,4 +57,9 @@ handlers:
   login: admin
 
 - url: /stats.*
-  script: appstats/ui.py
+  script: $PYTHON_LIB/google/appengine/ext/appstats/ui.py
+  
+admin_console:
+  pages:
+  - name: "Stats"
+    url: /stats

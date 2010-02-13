@@ -625,7 +625,7 @@ class PrintUserHandler(BaseHandler):
 		else:
 			self.redirect(users.create_login_url(self.request.uri))
 
-def real_main():
+def main():
 	application = webapp.WSGIApplication([
 		('/admin/?', AdminHandler),
 		('/documents', ClientHandler),
@@ -640,20 +640,6 @@ def real_main():
 		], debug=False)
 		
 	util.run_wsgi_app(application)
-
-def profile_main():
-	import cProfile, pstats, StringIO
-	prof = cProfile.Profile()
-	prof = prof.runctx("real_main()", globals(), locals())
-	stream = StringIO.StringIO()
-	stats = pstats.Stats(prof, stream=stream)
-	stats.sort_stats("time")  # Or cumulative
-	stats.print_stats(80)  # 80 = how many to print
-	# stats.print_callees()
-	# stats.print_callers()
-	G.info("Profile data:\n%s", stream.getvalue())
-
-main = real_main
 
 if __name__ == '__main__':
 	main()
