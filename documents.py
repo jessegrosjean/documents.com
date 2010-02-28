@@ -372,7 +372,11 @@ class ClientHandler(BaseHandler):
 class DocumentsHandler(BaseHandler):
 	@require_account
 	def get(self, account):
-		cache_key = account.user_id
+		if not account.user_id:
+			cache_key = account.user_id = account.user.user_id()
+		else:
+			cache_key = account.user_id
+
 		cached_response = memcache.get(cache_key)
 
 		if cached_response is None:
