@@ -16,9 +16,7 @@ indexes:
 - kind: Document
   properties:
   - name: deleted
-  - name: tags
-  - name: user_ids
-  - name: name
+  - name: modified
 
 - kind: Document
   properties:

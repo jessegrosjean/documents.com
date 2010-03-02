@@ -94,14 +94,9 @@ class Account(db.Model):
 	def __eq__(self, other):
 		return self.user == other.user if isinstance(other, Account) else False
 		
-	def get_documents(self, tag=None):
-		if tag:
-			documents_query_with_tag.bind(self.user_id, False, tag)
-			query = documents_query_with_tag
-		else:
-			documents_query.bind(self.user_id, False)
-			query = documents_query
-		return query
+	def get_documents(self):
+		documents_query.bind(self.user_id, False)
+		return documents_query
 
 class CompressedTextProperty(db.TextProperty):
 	def get_value_for_datastore(self, model_instance): 
@@ -381,7 +376,7 @@ class DocumentsHandler(BaseHandler):
 
 		if cached_response is None:
 			document_dicts = []
-			for document in account.get_documents(None):
+			for document in account.get_documents():
 				document_dicts.append(document.to_index_dictionary())			
 			cached_response = simplejson.dumps(document_dicts)
 			memcache.set(cache_key, cached_response)
@@ -539,7 +534,7 @@ class DocumentHandler(BaseHandler):
 				self.error(409)
 				raise ValueError, "Version does not match document version"
 
-			document.deleted = True			
+			document.deleted = True
 			db.put([document, document_account])
 			return document
 
@@ -618,8 +613,10 @@ class DocumentsCronHandler(BaseHandler):
 					to_delete.append(body)
 			db.delete(to_delete)
 
-		for each in Document.gql('WHERE deleted = True').fetch(5):
-			db.run_in_transaction(delete_document_txn, each)		
+		for each in Document.gql("WHERE deleted = True AND modified < :1", datetime.datetime.today() - datetime.timedelta(days=7)).fetch(5):
+			db.run_in_transaction(delete_document_txn, each)
+		
+		return
 
 class PrintUserHandler(BaseHandler):
 	def get(self):
