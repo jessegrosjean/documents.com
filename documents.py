@@ -447,6 +447,7 @@ def delta_update_document_txn(handler, user_account, document_account_id, docume
 		document.user_ids.append(document_user_id)
 	
 	if (patches != None):
+		logging.info("Patches: %s" % patches) # store in logs for debug
 		dmp.Match_Threshold = 0.75
 		patches = dmp.patch_fromText(patches)
 		body = document.get_body()
