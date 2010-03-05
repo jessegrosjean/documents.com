@@ -316,9 +316,17 @@ def render(file, template_values={}):
 	else:
 		return False
 
+newline_re = re.compile(u'\r\n|\r')
+illegal_re = re.compile(u'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]')
+
+def standardize_line_endings_and_characters(text):
+	text = newline_re.subn('\n', text)[0]
+	text = illegal_re.subn('', text)[0]
+	return text
+
 def validate_name(name):
 	if name:
-		name = re.split(r"(\r\n|\r|\n)", name, 1)[0]
+		name = standardize_line_endings_and_characters(re.split(r"(\r\n|\r|\n)", name, 1)[0])
 		l = len(name)
 		if l == 0:
 			name = 'Untitled'
@@ -397,8 +405,7 @@ class DocumentsHandler(BaseHandler):
 		name = validate_name(jsonDocument.get('name', None))
 		tags = jsonDocument.get('tags', [])
 		user_ids = list_with_user_id(jsonDocument.get('user_ids'), account.user_id)
-		content = jsonDocument.get('content', '')
-		content = re.sub(r"(\r\n|\r)", "\n", content)
+		content = standardize_line_endings_and_characters(jsonDocument.get('content', ''))
 
 		def create_document_txn():
 			document = Document(parent=account, version=0, name=name, tags=tags, user_ids=user_ids, size=len(content))
@@ -447,7 +454,7 @@ def delta_update_document_txn(handler, user_account, document_account_id, docume
 		patches = dmp.patch_fromText(patches)
 		body = document.get_body()
 		content, results, results_patches = dmp.patch_apply(patches, body.content)
-		content = re.sub(r"(\r\n|\r)", "\n", content)		
+		content = standardize_line_endings_and_characters(content)
 		document.size -= body.content_size
 		body.content = content
 		body.content_size = len(content)
