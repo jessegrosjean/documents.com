@@ -83,6 +83,13 @@ class Account(db.Model):
 			if account == None:
 				account = Account(user=user, user_id=user.user_id())
 				account.put()
+				if not account.user_id:
+					# Hack, and still doesn't totally work user.user_id() isn't set until user stored in DB.
+					# But even doing this, on dev server at least, user.user_id() gets loaded, but setting
+					# account.user_id doesn't seem to work. It remains None.
+					account = account_by_user_query.get()
+					account.user_id = account.user.user_id()
+					account.put()
 			else:
 				account.user = user
 				account.user_id = user.user_id()
@@ -95,7 +102,7 @@ class Account(db.Model):
 		return self.user == other.user if isinstance(other, Account) else False
 		
 	def get_documents(self):
-		documents_query.bind(self.user_id, False)
+		documents_query.bind(self.user.user_id(), False)
 		return documents_query
 
 class CompressedTextProperty(db.TextProperty):
@@ -246,7 +253,7 @@ def require_account(f):
 				return stop_processing
 		
 			handler.response.headers['Account-Email'] = str(user_account.user.email())
-			handler.response.headers['Account-ID'] = str(user_account.user_id)
+			handler.response.headers['Account-ID'] = str(user_account.user.user_id())
 			handler.response.headers['Server-Version'] = "2"
 			new_args = (handler, user_account) + args[1:]
 		
@@ -303,7 +310,7 @@ def get_document_and_document_account(handler, user_account, document_account_id
 	if document == None or document.deleted or document_account == None:
 		handler.error(404)
 		return None, None
-	elif not (document_account == user_account or user_account.user_id in document.user_ids or users.is_current_user_admin()):
+	elif not (document_account == user_account or user_account.user.user_id() in document.user_ids or users.is_current_user_admin()):
 		handler.error(401)
 		return None, None
 
@@ -375,11 +382,29 @@ class ClientHandler(BaseHandler):
 class DocumentsHandler(BaseHandler):
 	@require_account
 	def get(self, account):
-		if not account.user_id:
-			cache_key = account.user_id = account.user.user_id()
+		cache_key = account.user.user_id()
+		requestEtag = self.request.headers.get('If-None-Match', None)
+		serverEtag = memcache.get(cache_key)
+		
+		if requestEtag == serverEtag:
+			self.response.set_status(304)
 		else:
-			cache_key = account.user_id
+			document_dicts = []
+			for document in account.get_documents():
+				document_dicts.append(document.to_index_dictionary())			
+			json_response = simplejson.dumps(document_dicts)
 
+			if not serverEtag:
+				serverEtag = hashlib.md5(json_response).hexdigest()
+				memcache.set(cache_key, serverEtag)
+
+			self.response.headers['Etag'] = serverEtag
+			self.response.headers['Content-Type'] = 'application/json'
+			self.response.out.write(json_response)
+
+		""" Experiment, try just caching Etags instead of full response. New strategy should be faster for single
+		client case.
+		cache_key = account.user.user_id()
 		cached_response = memcache.get(cache_key)
 
 		if cached_response is None:
@@ -397,14 +422,14 @@ class DocumentsHandler(BaseHandler):
 			self.response.set_status(304)
 		else:
 			self.response.headers['Content-Type'] = 'application/json'
-			self.response.out.write(cached_response)
+			self.response.out.write(cached_response)"""
 
 	@require_account
 	def post(self, account):
 		jsonDocument = simplejson.loads(self.request.body)
 		name = validate_name(jsonDocument.get('name', None))
 		tags = jsonDocument.get('tags', [])
-		user_ids = list_with_user_id(jsonDocument.get('user_ids'), account.user_id)
+		user_ids = list_with_user_id(jsonDocument.get('user_ids'), account.user.user_id())
 		content = standardize_line_endings_and_characters(jsonDocument.get('content', ''))
 
 		def create_document_txn():
@@ -444,7 +469,7 @@ def delta_update_document_txn(handler, user_account, document_account_id, docume
 	if len(user_ids_added) > 0: document.user_ids = list_union(document.user_ids, user_ids_added)
 	if len(user_ids_removed) > 0: document.user_ids = list_minus(document.user_ids, user_ids_removed)
 
-	document_user_id = document_account.user_id
+	document_user_id = document_account.user.user_id()
 	if not document_user_id in document.user_ids:
 		document.user_ids.append(document_user_id)
 	
