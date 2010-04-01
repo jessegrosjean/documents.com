@@ -386,7 +386,7 @@ class DocumentsHandler(BaseHandler):
 		requestEtag = self.request.headers.get('If-None-Match', None)
 		serverEtag = memcache.get(cache_key)
 		
-		if requestEtag == serverEtag:
+		if requestEtag != None and requestEtag == serverEtag:
 			self.response.set_status(304)
 		else:
 			document_dicts = []
