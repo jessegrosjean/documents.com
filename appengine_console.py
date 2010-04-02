@@ -5,7 +5,7 @@ import sys
 
 #
 # Cheat sheet
-# documents.Document.all().filter("name =", "groceries.txt").fetch(100)
+# documents.Document.all().filter("name =", "To Do.taskpaper").fetch(100)
 #
 #
 

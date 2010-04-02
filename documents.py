@@ -386,7 +386,8 @@ class DocumentsHandler(BaseHandler):
 		requestEtag = self.request.headers.get('If-None-Match', None)
 		serverEtag = memcache.get(cache_key)
 		
-		if requestEtag != None and requestEtag == serverEtag:
+		if serverEtag != None and (requestEtag == serverEtag):
+			self.response.headers['Etag'] = serverEtag
 			self.response.set_status(304)
 		else:
 			document_dicts = []
@@ -401,28 +402,6 @@ class DocumentsHandler(BaseHandler):
 			self.response.headers['Etag'] = serverEtag
 			self.response.headers['Content-Type'] = 'application/json'
 			self.response.out.write(json_response)
-
-		""" Experiment, try just caching Etags instead of full response. New strategy should be faster for single
-		client case.
-		cache_key = account.user.user_id()
-		cached_response = memcache.get(cache_key)
-
-		if cached_response is None:
-			document_dicts = []
-			for document in account.get_documents():
-				document_dicts.append(document.to_index_dictionary())			
-			cached_response = simplejson.dumps(document_dicts)
-			memcache.set(cache_key, cached_response)
-
-		requestEtag = self.request.headers.get('If-None-Match', None)
-		serverEtag = hashlib.md5(cached_response).hexdigest()
-		self.response.headers['Etag'] = serverEtag
-
-		if requestEtag == serverEtag:
-			self.response.set_status(304)
-		else:
-			self.response.headers['Content-Type'] = 'application/json'
-			self.response.out.write(cached_response)"""
 
 	@require_account
 	def post(self, account):
